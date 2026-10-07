@@ -194,7 +194,7 @@ if (isset($update['callback_query'])) {
                 $users[$targetUser]['balance'] = ($users[$targetUser]['balance'] ?? 0) + 17.0;
                 saveData($usersDbFile,$users);
             }
-            editMessageText($chatId,$messageId, "✅ **কাজ অনুমোদিত (Approved)!**\n👤 ইউজার `{$targetUser}`-কে **১৭.০০ টাকা** যুক্ত করা হয়েছে।");
+            editMessageText($chatId, $messageId, "✅ **কাজ অনুমোদিত (Approved)!**\n👤 ইউজার {$targetUser}-কে **১৭.০০ টাকা** যুক্ত করা হয়েছে।");
             sendMessage($targetUser, "🎉 **অভিনন্দন!** আপনার জমাকৃত জিমেইলটি এডমিন কর্তৃক এপ্রুভ করা হয়েছে এবং **১৭.০০ টাকা** 💵 আপনার ব্যালেন্সে যোগ করা হয়েছে। 🥳");
         } elseif ($action === "reject") {
             if (isset($users[$targetUser])) {
@@ -208,7 +208,7 @@ if (isset($update['callback_query'])) {
     }
 
     // 2. Cashout Approval/Rejection by Admin
-    if ($action === "waccept" \vert{}\vert{} $action === "wreject") {
+if ($action === "waccept" || $action === "wreject") {
         if (!$isAdmin) {
             sendMessage($chatId, "⚠️ **অ্যাক্সেস Denied!**");
             exit;
