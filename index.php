@@ -1,7 +1,7 @@
+
 <?php
 /**
  * Telegram Gmail Task Bot (Production Ready)
- * Optimized for GitHub Hosting & Render/Railway/VPS Services
  */
 
 // ==========================================
@@ -9,7 +9,7 @@
 // ==========================================
 $botToken      = "8760332791:AAHLlAZdTKyW1lzdfvfiYIg0tZGKRf8zu7w";
 $adminUsername = "raiyan_07j"; 
-$adminChatId   = "7278071284"; // আপনার নির্দিষ্ট চ্যাট আইডি যুক্ত করা হয়েছে
+$adminChatId   = "7278071284";
 
 $website       = "https://api.telegram.org/bot" . $botToken;
 
@@ -26,10 +26,10 @@ function loadData($file) {
     }
     $content = file_get_contents($file);
     $data = json_decode($content, true);
-    return is_array($data) ? $data : [];
+    return is_array($data) ?$data : [];
 }
 
-function saveData($file, $data) {
+function saveData($file,$data) {
     file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT), LOCK_EX);
 }
 
@@ -40,7 +40,7 @@ $withdrawals = loadData($withdrawDbFile);
 // ==========================================
 // 2. HELPER & TELEGRAM API FUNCTIONS
 // ==========================================
-function sendMessage($chatId, $text, $keyboard = null) {
+function sendMessage($chatId, $text,$keyboard = null) {
     global $website;
     $payload = [
         'chat_id'    => $chatId,
@@ -59,7 +59,7 @@ function sendMessage($chatId, $text, $keyboard = null) {
     return $res;
 }
 
-function editMessageText($chatId, $messageId, $text, $keyboard = null) {
+function editMessageText($chatId,$messageId, $text,$keyboard = null) {
     global $website;
     $payload = [
         'chat_id'    => $chatId,
@@ -83,11 +83,21 @@ function generateCredentials() {
     $firstNames = ["tamim", "sakib", "rahim", "karim", "tanvir", "hasan", "sabbir", "arafat", "jubayer"];
     $lastNames  = ["ahmed", "khan", "chy", "hossain", "mahmud", "islam", "rahan"];
     $num        = rand(100, 9999);
-    $username   = $firstNames[array_rand($firstNames)] . $lastNames[array_rand($lastNames)] . $num . "@gmail.com";
+    $username   =$firstNames[array_rand($firstNames)] .$lastNames[array_rand($lastNames)] .$num . "@gmail.com";
 
     $chars    = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#";
     $password = substr(str_shuffle($chars), 0, 10);
-    return [$username, $password];
+    return [$username,$password];
+}
+
+// Reset state helper
+function resetUserState(&$users, $userId,$file) {
+    $users[$userId]['awaiting_submission']      = false;
+    $users[$userId]['awaiting_withdraw_number'] = false;
+    $users[$userId]['awaiting_withdraw_amount'] = false;
+    $users[$userId]['withdraw_method']          = null;
+    $users[$userId]['withdraw_number']          = null;
+    saveData($file,$users);
 }
 
 // ==========================================
@@ -107,6 +117,17 @@ $withdrawKeyboard = [
         [
             ["text" => "🔴 বিকাশ (bKash)", "callback_data" => "wmethod_bkash"],
             ["text" => "🟠 নগদ (Nagad)", "callback_data" => "wmethod_nagad"]
+        ],
+        [
+            ["text" => "❌ বাতিল করুন", "callback_data" => "cancel_action"]
+        ]
+    ]
+];
+
+$cancelKeyboard = [
+    'inline_keyboard' => [
+        [
+            ["text" => "❌ বাতিল করুন", "callback_data" => "cancel_action"]
         ]
     ]
 ];
@@ -125,40 +146,41 @@ if (!$update) {
 // A. CALLBACK QUERY (BUTTON CLICK HANDLERS)
 // ------------------------------------------
 if (isset($update['callback_query'])) {
-    $callback  = $update['callback_query'];
-    $chatId    = $callback['message']['chat']['id'];
+    $callback  =$update['callback_query'];
+    $chatId    =$callback['message']['chat']['id'];
     $messageId =$callback['message']['message_id'];
     $data      =$callback['data'];
     $fromUser  =$callback['from'];
 
-    // --- User Task Actions (Complete / Cancel) ---
-    if ($data === "user_task_complete") {
-        $users[$chatId]['awaiting_submission'] = true;
+    // --- Action Cancel Button ---
+    if ($data === "cancel_action" \vert{}\vert{} $data === "user_task_cancel") {
+        resetUserState($users, $chatId,$usersDbFile);
+        $users[$chatId]['generated_gmail'] = null;
+        $users[$chatId]['generated_pass']  = null;
         saveData($usersDbFile,$users);
 
-        editMessageText($chatId,$messageId, "📥 **কাজ সাবমিশন নির্দেশাবলী:**\n\nআপনি যে জিমেইল একাউন্টটি তৈরি করেছেন, সেটি নিচে লিখে এখনই পাঠিয়ে দিন।");
-        exit;
-    }
-
-    if ($data === "user_task_cancel") {
-        $users[$chatId]['awaiting_submission'] = false;
-        $users[$chatId]['generated_gmail']     = null;
-        $users[$chatId]['generated_pass']      = null;
-        saveData($usersDbFile,$users);
-
-        editMessageText($chatId,$messageId, "❌ **কাজটি বাতিল করা হয়েছে!**\n\nআপনি আবার নতুন কাজ শুরু করতে পারবেন।");
+        editMessageText($chatId,$messageId, "❌ **অপারেশনটি বাতিল করা হয়েছে!**");
         sendMessage($chatId, "প্রধান মেনু:", $mainKeyboard);
         exit;
     }
 
+    // --- Task Submission Complete ---
+    if ($data === "user_task_complete") {
+        $users[$chatId]['awaiting_submission'] = true;
+        saveData($usersDbFile,$users);
+
+        editMessageText($chatId, $messageId, "📥 **কাজ সাবমিশন নির্দেশাবলী:**\n\nআপনি যে জিমেইল একাউন্টটি তৈরি করেছেন, সেটি নিচে লিখে এখনই পাঠিয়ে দিন।", $cancelKeyboard);
+        exit;
+    }
+
     // --- Cashout Method Selection ---
-    if ($data === "wmethod_bkash" || $data === "wmethod_nagad") {
+    if ($data === "wmethod_bkash" \vert{}\vert{} $data === "wmethod_nagad") {
         $method = ($data === "wmethod_bkash") ? "বিকাশ" : "নগদ";
         $users[$chatId]['withdraw_method']          =$method;
         $users[$chatId]['awaiting_withdraw_number'] = true;
         saveData($usersDbFile,$users);
 
-        sendMessage($chatId, "📲 **{$method} পেমেন্ট গেটওয়ে**\n\nঅনুগ্রহ করে আপনার **{$method} নম্বরটি** লিখে মেসেজ পাঠিয়েন:");
+        sendMessage($chatId, "📲 **{$method} পেমেন্ট গেটওয়ে**\n\nঅনুগ্রহ করে আপনার **{$method} নম্বরটি** লিখে মেসেজ পাঠিয়েন:", $cancelKeyboard);
         exit;
     }
 
@@ -166,11 +188,10 @@ if (isset($update['callback_query'])) {
     $parts  = explode("_", $data);
     $action =$parts[0] ?? '';
 
-    // Admin Verification Authorization (username OR chat_id check)
     $isAdmin = (($fromUser['username'] ?? '') ===$adminUsername) || ($chatId ==$adminChatId);
 
-    // 1. Task Approval/Rejection by Admin
-    if ($action === "accept" || $action === "reject") {
+    // 1. Task Approval
+    if ($action === "accept" \vert{}\vert{} $action === "reject") {
         if (!$isAdmin) {
             sendMessage($chatId, "⚠️ **অ্যাক্সেস Denied!** আপনি এডমিন নন।");
             exit;
@@ -194,7 +215,7 @@ if (isset($update['callback_query'])) {
                 $users[$targetUser]['balance'] = ($users[$targetUser]['balance'] ?? 0) + 17.0;
                 saveData($usersDbFile,$users);
             }
-            editMessageText($chatId, $messageId, "✅ **কাজ অনুমোদিত (Approved)!**\n👤 ইউজার {$targetUser}-কে **১৭.০০ টাকা** যুক্ত করা হয়েছে।");
+            editMessageText($chatId,$messageId, "✅ **কাজ অনুমোদিত (Approved)!**\n👤 ইউজার `{$targetUser}`-কে **১৭.০০ টাকা** যুক্ত করা হয়েছে।");
             sendMessage($targetUser, "🎉 **অভিনন্দন!** আপনার জমাকৃত জিমেইলটি এডমিন কর্তৃক এপ্রুভ করা হয়েছে এবং **১৭.০০ টাকা** 💵 আপনার ব্যালেন্সে যোগ করা হয়েছে। 🥳");
         } elseif ($action === "reject") {
             if (isset($users[$targetUser])) {
@@ -207,8 +228,8 @@ if (isset($update['callback_query'])) {
         exit;
     }
 
-    // 2. Cashout Approval/Rejection by Admin
-if ($action === "waccept" || $action === "wreject") {
+    // 2. Cashout Approval
+    if ($action === "waccept" \vert{}\vert{} $action === "wreject") {
         if (!$isAdmin) {
             sendMessage($chatId, "⚠️ **অ্যাক্সেস Denied!**");
             exit;
@@ -254,7 +275,6 @@ if (isset($update['message'])) {
     $user    =$message['from'];
     $userId  =$user['id'];
 
-    // Register User Profile
     if (!isset($users[$userId])) {
         $users[$userId] = [
             'balance'                  => 0.0,
@@ -271,6 +291,16 @@ if (isset($update['message'])) {
         saveData($usersDbFile,$users);
     }
 
+    // Command Filter: /start Always Resets States
+    if ($text === "/start") {
+        resetUserState($users, $userId,$usersDbFile);
+
+        $welcomeText = "🥰 **স্বাগতম, " . htmlspecialchars($user['first_name']) . "!** 👋\n\n" .
+                       "✅ **কাজ শুরু করতে নিচের বাটনগুলো ব্যবহার করুন** 👇";
+        sendMessage($chatId, $welcomeText,$mainKeyboard);
+        exit;
+    }
+
     // Step 1: Receiving Withdraw Number
     if (!empty($users[$userId]['awaiting_withdraw_number'])) {$users[$userId]['withdraw_number']          =$text;
         $users[$userId]['awaiting_withdraw_number'] = false;
@@ -278,7 +308,7 @@ if (isset($update['message'])) {
         saveData($usersDbFile,$users);
 
         $bal = number_format($users[$userId]['balance'] ?? 0, 2);
-        sendMessage($chatId, "💰 **কত টাকা তুলতে চান?**\nপরিমাণ লিখে পাঠান (সর্বনিম্ন ৫০.০০ টাকা):\n\n*(বর্তমান ব্যালেন্স: {$bal} টাকা)*");
+        sendMessage($chatId, "💰 **কত টাকা তুলতে চান?**\nপরিমাণ লিখে পাঠান (সর্বনিম্ন ৫০.০০ টাকা):\n\n*(বর্তমান ব্যালেন্স: {$bal} টাকা)*", $cancelKeyboard);
         exit;
     }
 
@@ -286,12 +316,12 @@ if (isset($update['message'])) {
     if (!empty($users[$userId]['awaiting_withdraw_amount'])) {$amount  = floatval($text);$userBal = $users[$userId]['balance'] ?? 0.0;
 
         if ($amount < 50) {
-            sendMessage($chatId, "⚠️ **সর্বনিম্ন উত্তোলন সীমা ৫০.০০ টাকা!**\nঅনুগ্রহ করে সঠিকভাবে টাকার পরিমাণ পাঠান:");
+            sendMessage($chatId, "⚠️ **সর্বনিম্ন উত্তোলন সীমা ৫০.০০ টাকা!**\nঅনুগ্রহ করে সঠিকভাবে টাকার পরিমাণ পাঠান:", $cancelKeyboard);
             exit;
         }
 
         if ($amount >$userBal) {
-            sendMessage($chatId, "❌ **অপর্যাপ্ত ব্যালেন্স!** আপনার ওয়ালেটে এই পরিমাণ টাকা নেই। সঠিক পরিমাণ পাঠিয়েন:");
+            sendMessage($chatId, "❌ **অপর্যাপ্ত ব্যালেন্স!** আপনার ওয়ালেটে এই পরিমাণ টাকা নেই। সঠিক পরিমাণ পাঠিয়েন:", $cancelKeyboard);
             exit;
         }
 
@@ -312,7 +342,6 @@ if (isset($update['message'])) {
 
         sendMessage($chatId, "✅ **ক্যাশআউট রিকোয়েস্ট জমা হয়েছে!** 💸\n\nমেথড: **{$method}**\nনম্বর: `{$number}`\nপরিমাণ: **{$amount} টাকা**\n\n⏳ এডমিন রিভিউ সম্পন্ন করে পেমেন্ট পাঠিয়ে দেবে।", $mainKeyboard);
 
-        // Admin Notification Sent DIRECTLY to Admin Chat ID
         $adminWithdrawKb = [
             'inline_keyboard' => [
                 [
@@ -332,18 +361,47 @@ if (isset($update['message'])) {
         exit;
     }
 
-    // --- Standard Navigation Commands ---
-    if ($text === "/start") {
-        $users[$userId]['awaiting_submission']      = false;
-        $users[$userId]['awaiting_withdraw_number'] = false;
-        $users[$userId]['awaiting_withdraw_amount'] = false;
+    // Step 3: Processing Task Submission
+    if (!empty($users[$userId]['awaiting_submission'])) {
+        $submittedGmail =$text;
+        $genGmail       =$users[$userId]['generated_gmail'];$genPass        = $users[$userId]['generated_pass'];
+
+        $users[$userId]['pending']             = ($users[$userId]['pending'] ?? 0) + 17.0;
+        $users[$userId]['awaiting_submission'] = false;
         saveData($usersDbFile,$users);
 
-        $welcomeText = "🥰 **স্বাগতম, " . htmlspecialchars($user['first_name']) . "!** 👋\n\n" .
-                       "✅ **কাজ শুরু করতে নিচের বাটনগুলো ব্যবহার করুন** 👇";
-        sendMessage($chatId, $welcomeText,$mainKeyboard);
-    } 
-    elseif ($text === "/admin") {
+        $submissionId           =$userId . "_" . rand(1000, 9999);
+        $pending[$submissionId] = [
+            'user_id'        => $userId,
+            'gmail'          => $submittedGmail,
+            'expected_gmail' => $genGmail,
+            'pass'           => $genPass
+        ];
+        saveData($pendingDbFile,$pending);
+
+        sendMessage($chatId, "✅ **কাজটি সফলভাবে এডমিনের কাছে পাঠানো হয়েছে!** 📩\n⏳ এডমিন চেক করে এপ্রুভ করলে **১৭.০০ টাকা** মেইন ব্যালেন্সে জমা হবে। 💰", $mainKeyboard);
+
+        $adminKeyboard = [
+            'inline_keyboard' => [
+                [
+                    ["text" => "✅ Approve (17 Tk)", "callback_data" => "accept_" . $submissionId],
+                    ["text" => "❌ Reject", "callback_data" => "reject_" . $submissionId]
+                ]
+            ]
+        ];
+
+        $adminMsg = "🔔 **নতুন জিমেইল জমা পড়েছে (Review Queue)** 📥\n\n" .
+                    "👤 **ইউজার ID:** `{$userId}`\n" .
+                    "📧 **অ্যাসাইন করা জিমেইল:** `{$genGmail}`\n" .
+                    "🔑 **পাসওয়ার্ড:** `{$genPass}`\n" .
+                    "📩 **ইউজারের পাঠানো ডাটা:** `{$submittedGmail}`";
+
+        sendMessage($adminChatId, "--- [ADMIN REVIEW REQUIRED] ---\n" . $adminMsg,$adminKeyboard);
+        exit;
+    }
+
+    // --- Navigation Commands ---
+    if ($text === "/admin") {
         if ((($user['username'] ?? '') ===$adminUsername) || ($chatId ==$adminChatId)) {
             $totalUsers       = count($users);
             $pendingWorks     = count($pending);
@@ -389,51 +447,19 @@ if (isset($update['message'])) {
         sendMessage($chatId, "💳 **টাকা উত্তোলন সেকশন** 💸\n\nপেমেন্ট নেওয়ার জন্য বিকাশ বা নগদ নির্বাচন করুন 👇", $withdrawKeyboard);
     } 
     elseif ($text === "🙋‍♂️ সাপোর্ট") {
-        $msg = "🙋‍♂️ **সাপোর্ট সেন্টার** 📞\n\n" .
-               "যেকোনো প্রয়োজনে এডমিনের সাথে যোগাযোগ করুন:\n" .
-               "👤 **এডমিন:** @" . $adminUsername;
-        sendMessage($chatId,$msg);
-    } 
-    elseif (in_array($text, ["🎁 My Referrals", "👶 আমি নতুন"])) {
-        sendMessage($chatId, "ℹ️ '**{$text}**' ফিচারটি শীঘ্রই চালু হবে!");
-    } 
-    // Step 3: Processing Gmail Submission from User
-    elseif (!empty($users[$userId]['awaiting_submission'])) {
-        $submittedGmail =$text;
-        $genGmail       =$users[$userId]['generated_gmail'];$genPass        = $users[$userId]['generated_pass'];
-
-        $users[$userId]['pending']             = ($users[$userId]['pending'] ?? 0) + 17.0;
-        $users[$userId]['awaiting_submission'] = false;
-        saveData($usersDbFile,$users);
-
-        $submissionId           =$userId . "_" . rand(1000, 9999);
-        $pending[$submissionId] = [
-            'user_id'        => $userId,
-            'gmail'          => $submittedGmail,
-            'expected_gmail' => $genGmail,
-            'pass'           => $genPass
-        ];
-        saveData($pendingDbFile,$pending);
-
-        sendMessage($chatId, "✅ **কাজটি সফলভাবে এডমিনের কাছে পাঠানো হয়েছে!** 📩\n⏳ এডমিন চেক করে এপ্রুভ করলে **১৭.০০ টাকা** মেইন ব্যালেন্সে জমা হবে। 💰", $mainKeyboard);
-
-        // Admin Approval Panel Notification Sent DIRECTLY to Admin Chat ID (7278071284)
-        $adminKeyboard = [
+        $supportKeyboard = [
             'inline_keyboard' => [
                 [
-                    ["text" => "✅ Approve (17 Tk)", "callback_data" => "accept_" . $submissionId],
-                    ["text" => "❌ Reject", "callback_data" => "reject_" . $submissionId]
+                    ["text" => "💬 এডমিনের সাথে কথা বলুন", "url" => "https://t.me/" . $adminUsername]
                 ]
             ]
         ];
-
-        $adminMsg = "🔔 **নতুন জিমেইল জমা পড়েছে (Review Queue)** 📥\n\n" .
-                    "👤 **ইউজার ID:** `{$userId}`\n" .
-                    "📧 **অ্যাসাইন করা জিমেইল:** `{$genGmail}`\n" .
-                    "🔑 **পাসওয়ার্ড:** `{$genPass}`\n" .
-                    "📩 **ইউজারের পাঠানো ডাটা:** `{$submittedGmail}`";
-
-        sendMessage($adminChatId, "--- [ADMIN REVIEW REQUIRED] ---\n" . $adminMsg,$adminKeyboard);
+        $msg = "🙋‍♂️ **সাপোর্ট সেন্টার** 📞\n\n" .
+               "যেকোনো সমস্যা বা সহযোগিতার জন্য নিচের বাটনে ক্লিক করে সরাসরি এডমিনের সাথে কথা বলুন:";
+        sendMessage($chatId, $msg,$supportKeyboard);
+    } 
+    elseif (in_array($text, ["🎁 My Referrals", "👶 আমি নতুন"])) {
+        sendMessage($chatId, "ℹ️ '**{$text}**' ফিচারটি শীঘ্রই চালু হবে!");
     }
 }
 ?>
