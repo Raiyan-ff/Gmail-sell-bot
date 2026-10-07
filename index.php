@@ -153,7 +153,7 @@ if (isset($update['callback_query'])) {
     $fromUser  =$callback['from'];
 
     // --- Action Cancel Button ---
-    if ($data === "cancel_action" \vert{}\vert{} $data === "user_task_cancel") {
+    if ($data === "cancel_action" || $data === "user_task_cancel") {
         resetUserState($users, $chatId,$usersDbFile);
         $users[$chatId]['generated_gmail'] = null;
         $users[$chatId]['generated_pass']  = null;
@@ -174,7 +174,7 @@ if (isset($update['callback_query'])) {
     }
 
     // --- Cashout Method Selection ---
-    if ($data === "wmethod_bkash" \vert{}\vert{} $data === "wmethod_nagad") {
+    if ($data === "wmethod_bkash" || $data === "wmethod_nagad") {
         $method = ($data === "wmethod_bkash") ? "বিকাশ" : "নগদ";
         $users[$chatId]['withdraw_method']          =$method;
         $users[$chatId]['awaiting_withdraw_number'] = true;
