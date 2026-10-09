@@ -10,7 +10,7 @@
 $botToken      = "8760332791:AAHLlAZdTKyW1lzdfvfiYIg0tZGKRf8zu7w";
 $adminUsername = "raiyan_07j";
 $adminChatId   = "7278071284";
-$botUsername   = "RS1_ESPORTS_BD_bot";
+$botUsername   = "rs1_espbot";
 ​$website = "https://api.telegram.org/bot{$botToken}";
 ​// Database Files Path
 $usersDbFile    = __DIR__ . "/users.json";
