@@ -14,7 +14,7 @@ $botUsername   = "rs1_espbot";
 
 $website       = "https://api.telegram.org/bot" . $botToken;
 
-// Database Files Path (Correct __DIR__ with double underscores)
+// Database Files Path
 $usersDbFile    = __DIR__ . "/users.json";
 $pendingDbFile  = __DIR__ . "/pending.json";
 $withdrawDbFile = __DIR__ . "/withdrawals.json";
@@ -548,7 +548,7 @@ if (isset($update['message'])) {
         ];
         saveData($withdrawDbFile,$withdrawals);
 
-        sendMessage($chatId, "✅ **ক্যাশআউট রিকোয়েস্ট জমা হয়েছে!** 💸\n\nমেথড: **{$method}**\nনম্বর: `{$number}`\nপরিমাণ: **{$amount} টাকা**\n\n⏳ এডমিন রিভিউ সম্পন্ন করে পেমেন্ট পাঠিয়ে দেবে।", getMainKeyboard($isAdmin));
+        sendMessage($chatId, "✅ **ক্যাশআউট রিকোয়েস্ট জমা হয়েছে!** 💸\n\nমেথড: **{$method}**\nনম্বর: `{$number}`\nপরিমাণ: **{$amount} টাকা**\n\n⏳ এডমিন রিভিউ সম্পন্ন করে পেমেন্ট বানিয়ে দেবে।", getMainKeyboard($isAdmin));
 
         $adminWithdrawKb = [
             'inline_keyboard' => [
