@@ -1,7 +1,7 @@
 <?php
 /**
  * Telegram Gmail Task & Earning Bot (Production Ready)
- * Features: Dynamic Admin Panel, Deposit System with TrxID, Dynamic Referral Link, Gmail Price Update, Broadcast.
+ * Features: Dynamic Admin Panel, Daily Serialized Channel Proofs, User Search, Dynamic Payment Numbers.
  */
 
 // ==========================================
@@ -45,10 +45,32 @@ $settings    = loadData($settingsDbFile);
 
 // Set Default Settings
 if (!isset($settings['gmail_price'])) {
-    $settings['gmail_price'] = 17.0; // Default price per Gmail
-    saveData($settingsDbFile, $settings);
+    $settings['gmail_price'] = 17.0;
 }
-$gmailPrice = floatval($settings['gmail_price']);
+if (!isset($settings['bkash_number'])) {
+    $settings['bkash_number'] = "01852261415";
+}
+if (!isset($settings['nagad_number'])) {
+    $settings['nagad_number'] = "01852261415";
+}
+if (!isset($settings['min_deposit'])) {
+    $settings['min_deposit'] = 20.0;
+}
+if (!isset($settings['proof_channel'])) {
+    $settings['proof_channel'] = "";
+}
+if (!isset($settings['daily_approved_count'])) {
+    $settings['daily_approved_count'] = 0;
+}
+if (!isset($settings['last_reset_date'])) {
+    $settings['last_reset_date'] = date("Y-m-d");
+}
+saveData($settingsDbFile, $settings);
+
+$gmailPrice  = floatval($settings['gmail_price']);
+$bkashNumber = $settings['bkash_number'];
+$nagadNumber = $settings['nagad_number'];
+$minDeposit  = floatval($settings['min_deposit']);
 
 // ==========================================
 // 2. HELPER & TELEGRAM API FUNCTIONS
@@ -111,13 +133,16 @@ function resetUserState(&$users, $userId, $file) {
     $users[$userId]['awaiting_deposit_details'] = false;
     $users[$userId]['awaiting_broadcast']       = false;
     $users[$userId]['awaiting_price_change']    = false;
+    $users[$userId]['awaiting_number_change']   = false;
+    $users[$userId]['awaiting_channel_change']  = false;
+    $users[$userId]['awaiting_find_user']       = false;
     $users[$userId]['withdraw_method']          = null;
     $users[$userId]['withdraw_number']          = null;
     $users[$userId]['deposit_method']           = null;
     saveData($file, $users);
 }
 
-// Function to generate Keyboard (Admin gets extra Admin Panel Button)
+// Function to generate Keyboard
 function getMainKeyboard($isAdmin = false) {
     $rows = [
         [["text" => "📝 কাজ ▸"], ["text" => "💵 ব্যালেন্স"]],
@@ -192,10 +217,10 @@ if (isset($update['callback_query'])) {
     $data      = $callback['data'];
     $fromUser  = $callback['from'];
 
-    $isAdmin = (($fromUser['username'] ?? '') === $adminUsername) || ($chatId == $adminChatId);
+    $isAdmin = (in_array(($fromUser['username'] ?? ''), [$adminUsername])) or ($chatId == $adminChatId);
 
     // --- Action Cancel Button ---
-    if ($data === "cancel_action" || $data === "user_task_cancel") {
+    if (in_array($data, ["cancel_action", "user_task_cancel"])) {
         resetUserState($users, $chatId, $usersDbFile);
         $users[$chatId]['generated_gmail'] = null;
         $users[$chatId]['generated_pass']  = null;
@@ -216,61 +241,103 @@ if (isset($update['callback_query'])) {
     }
 
     // --- Cashout Method Selection ---
-    if ($data === "wmethod_bkash" || $data === "wmethod_nagad") {
+    if (in_array($data, ["wmethod_bkash", "wmethod_nagad"])) {
         $method = ($data === "wmethod_bkash") ? "বিকাশ" : "নগদ";
         $users[$chatId]['withdraw_method']          = $method;
         $users[$chatId]['awaiting_withdraw_number'] = true;
         saveData($usersDbFile, $users);
 
-        sendMessage($chatId, "📲 **{$method} পেমেন্ট গেটওয়ে**\n\nঅনুগ্রহ করে আপনার **{$method} নম্বরটি** লিখে মেসেজ পাঠিয়েন:", $cancelKeyboard);
+        sendMessage($chatId, "📲 **{$method} পেমেন্ট গেটওয়ে**\n\nঅনুগ্রহ করে আপনার **{$method} নম্বরটি** লিখে মেসেজ পাঠান:", $cancelKeyboard);
         exit;
     }
 
     // --- Deposit Method Selection ---
-    if ($data === "depmethod_bkash" || $data === "depmethod_nagad") {
-        $method = ($data === "depmethod_bkash") ? "বিকাশ (bKash)" : "নগদ (Nagad)";
+    if (in_array($data, ["depmethod_bkash", "depmethod_nagad"])) {
+        $isBkash = ($data === "depmethod_bkash");
+        $method  = $isBkash ? "বিকাশ (bKash)" : "নগদ (Nagad)";
+        $number  = $isBkash ? $bkashNumber : $nagadNumber;
+
         $users[$chatId]['deposit_method']           = $method;
         $users[$chatId]['awaiting_deposit_details'] = true;
         saveData($usersDbFile, $users);
 
         $depMsg = "📥 **{$method} ডিপোজিট**\n\n" .
-                  "নিচের নম্বরে টাকা Send Money করুন সর্বনিম্ন Amount 10৳:\n" .
-                  "📱 **এডমিন নম্বর:** `01852261415` *(Personal)*\n\n" .
-                  "⚠️ **টাকা পাঠানোর পর নিচের মতো একটা মেসেজে পাঠান:**\n" .
+                  "নিচের নম্বরে টাকা Send Money করুন:\n" .
+                  "📱 **নম্বর:** `{$number}` *(Personal)*\n" .
+                  "💵 **সর্বনিম্ন ডিপোজিট:** **{$minDeposit} টাকা**\n\n" .
+                  "⚠️ **টাকা পাঠানোর পর নিচের মতো এক মেসেজে পাঠান:**\n" .
                   "`[টাকার পরিমাণ] [TrxID]`\n\n" .
-                  "👉 **উদাহরণ:** `100 9J82KS10`";
+                  "👉 **উদাহরণ:** `50 9J82KS10`";
 
-        sendMessage($chatId, $depMsg,$cancelKeyboard);
+        sendMessage($chatId, $depMsg, $cancelKeyboard);
         exit;
     }
 
     // --- Admin Panel Callback Actions ---
     if ($isAdmin) {
         if ($data === "admin_broadcast") {
-            resetUserState($users, $chatId,$usersDbFile);
+            resetUserState($users, $chatId, $usersDbFile);
             $users[$chatId]['awaiting_broadcast'] = true;
-            saveData($usersDbFile,$users);
+            saveData($usersDbFile, $users);
 
             sendMessage($chatId, "📢 **ব্রডকাস্ট মেসেজ অপশন**\n\nযে মেসেজটি সকল বটের ইউজারের কাছে পাঠাতে চান, তা নিচে টাইপ করে পাঠান:", $cancelKeyboard);
             exit;
         }
 
         if ($data === "admin_set_price") {
-            resetUserState($users, $chatId,$usersDbFile);
+            resetUserState($users, $chatId, $usersDbFile);
             $users[$chatId]['awaiting_price_change'] = true;
-            saveData($usersDbFile,$users);
+            saveData($usersDbFile, $users);
 
             sendMessage($chatId, "💰 **জিমেইল প্রাইস পরিবর্তন**\n\nবর্তমান প্রাইস: **{$gmailPrice} টাকা**\n\nপ্রতি জিমেইলের নতুন দাম (টাকায়) লিখে পাঠান (যেমন: `18` বা `20`):", $cancelKeyboard);
+            exit;
+        }
+
+        if ($data === "admin_set_numbers") {
+            resetUserState($users, $chatId, $usersDbFile);
+            $users[$chatId]['awaiting_number_change'] = true;
+            saveData($usersDbFile, $users);
+
+            $msg = "📱 **বিকাশ ও নগদ নম্বর পরিবর্তন**\n\n" .
+                   "🔴 বর্তমান বিকাশ: `{$bkashNumber}`\n" .
+                   "🟠 বর্তমান নগদ: `{$nagadNumber}`\n\n" .
+                   "নতুন দুটি নম্বর এক লাইনে স্পেস দিয়ে লিখে পাঠান:\n" .
+                   "`[বিকাশ_নম্বর] [নগদ_নম্বর]`\n\n" .
+                   "👉 **উদাহরণ:** `01852261415 01852261415`";
+            sendMessage($chatId, $msg, $cancelKeyboard);
+            exit;
+        }
+
+        if ($data === "admin_set_channel") {
+            resetUserState($users, $chatId, $usersDbFile);
+            $users[$chatId]['awaiting_channel_change'] = true;
+            saveData($usersDbFile, $users);
+
+            $currChan = $settings['proof_channel'] ? $settings['proof_channel'] : "সেট করা নেই";
+            $msg = "📢 **প্রুফ চ্যানেল সেটিং**\n\n" .
+                   "বর্তমান চ্যানেল: `{$currChan}`\n\n" .
+                   "আপনার টেলিগ্রাম চ্যানেলের Username (যেমন: `@MyChannel`) অথবা Chat ID পাঠান:\n" .
+                   "*(নোট: বটকে অবশ্যই ওই চ্যানেলে Admin বানাতে হবে)*";
+            sendMessage($chatId, $msg, $cancelKeyboard);
+            exit;
+        }
+
+        if ($data === "admin_find_user") {
+            resetUserState($users, $chatId, $usersDbFile);
+            $users[$chatId]['awaiting_find_user'] = true;
+            saveData($usersDbFile, $users);
+
+            sendMessage($chatId, "🔍 **ইউজার খুঁজুন**\n\nযে ইউজারের তথ্য জানতে চান, তার **Telegram User ID** লিখে পাঠান:", $cancelKeyboard);
             exit;
         }
     }
 
     // --- Admin Approval Handlers ---
     $parts  = explode("_", $data);
-    $action =$parts[0] ?? '';
+    $action = $parts[0] ?? '';
 
     // 1. Gmail Task Approval
-    if ($action === "accept" || $action === "reject") {
+    if (in_array($action, ["accept", "reject"])) {
         if (!$isAdmin) {
             sendMessage($chatId, "⚠️ **অ্যাক্সেস Denied!** আপনি এডমিন নন।");
             exit;
@@ -279,22 +346,51 @@ if (isset($update['callback_query'])) {
         $subId = ($parts[1] ?? '') . "_" . ($parts[2] ?? '');
 
         if (!isset($pending[$subId])) {
-            editMessageText($chatId,$messageId, "⚠️ **এই কাজটি ইতোমধ্যে রিভিউ করা শেষ!** 🛑");
+            editMessageText($chatId, $messageId, "⚠️ **এই কাজটি ইতোমধ্যে রিভিউ করা শেষ!** 🛑");
             exit;
         }
 
         $subData    = $pending[$subId];
-        $targetUser =$subData['user_id'];
+        $targetUser = $subData['user_id'];
         unset($pending[$subId]);
-        saveData($pendingDbFile,$pending);
+        saveData($pendingDbFile, $pending);
 
         if ($action === "accept") {
-            if (isset($users[$targetUser])) {
-                $users[$targetUser]['pending'] = max(0, ($users[$targetUser]['pending'] ?? 0) - $gmailPrice);$users[$targetUser]['balance'] = ($users[$targetUser]['balance'] ?? 0) +$gmailPrice;
-                saveData($usersDbFile,$users);
+            // Daily Reset Logic
+            $today = date("Y-m-d");
+            if (($settings['last_reset_date'] ?? '') !== $today) {
+                $settings['last_reset_date']      = $today;
+                $settings['daily_approved_count'] = 0;
             }
-            editMessageText($chatId,$messageId, "✅ **কাজ অনুমোদিত (Approved)!**\n👤 ইউজার `{$targetUser}`-কে **{$gmailPrice} টাকা** যুক্ত করা হয়েছে।");
+
+            $settings['daily_approved_count']++;
+            saveData($settingsDbFile, $settings);
+
+            $serialNum = $settings['daily_approved_count'];
+
+            if (isset($users[$targetUser])) {
+                $users[$targetUser]['pending'] = max(0, ($users[$targetUser]['pending'] ?? 0) - $gmailPrice);
+                $users[$targetUser]['balance'] = ($users[$targetUser]['balance'] ?? 0) + $gmailPrice;
+                saveData($usersDbFile, $users);
+            }
+
+            editMessageText($chatId, $messageId, "✅ **কাজ অনুমোদিত (Approved)!**\n👤 ইউজার `{$targetUser}`-কে **{$gmailPrice} টাকা** যুক্ত করা হয়েছে।\n🔢 আজকের সিরিয়াল: **#{$serialNum}**");
             sendMessage($targetUser, "🎉 **অভিনন্দন!** আপনার জমাকৃত জিমেইলটি এডমিন কর্তৃক এপ্রুভ করা হয়েছে এবং **{$gmailPrice} টাকা** 💵 আপনার ব্যালেন্সে যোগ করা হয়েছে। 🥳");
+
+            // Send Proof to Channel
+            if (!empty($settings['proof_channel'])) {
+                $subGmail =$subData['gmail'] ?? 'N/A';
+                $subPass  =$subData['pass'] ?? 'N/A';
+
+                $channelMsg = "📧 **এপ্রুভড জিমেইল লগ** ✅\n\n" .
+                              "🔢 **সিরিয়াল:** #{$serialNum}\n" .
+                              "👤 **ইউজার ID:** `{$targetUser}`\n" .
+                              "📧 **ইমেইল:** `{$subGmail}`\n" .
+                              "🔑 **পাসওয়ার্ড:** `{$subPass}`\n" .
+                              "📅 **তারিখ:** {$today}";
+
+                sendMessage($settings['proof_channel'],$channelMsg);
+            }
         } elseif ($action === "reject") {
             if (isset($users[$targetUser])) {$users[$targetUser]['pending'] = max(0, ($users[$targetUser]['pending'] ?? 0) -$gmailPrice);
                 saveData($usersDbFile,$users);
@@ -306,7 +402,7 @@ if (isset($update['callback_query'])) {
     }
 
     // 2. Cashout Approval
-    if ($action === "waccept" || $action === "wreject") {
+    if (in_array($action, ["waccept", "wreject"])) {
         if (!$isAdmin) {
             sendMessage($chatId, "⚠️ **অ্যাক্সেস Denied!**");
             exit;
@@ -342,7 +438,7 @@ if (isset($update['callback_query'])) {
     }
 
     // 3. Deposit Approval
-if ($action === "daccept" || $action === "dreject") {
+    if (in_array($action, ["daccept", "dreject"])) {
         if (!$isAdmin) {
             sendMessage($chatId, "⚠️ **অ্যাক্সেস Denied!**");
             exit;
@@ -388,7 +484,7 @@ if (isset($update['message'])) {
     $user    =$message['from'];
     $userId  =$user['id'];
 
-    $isAdmin = (($user['username'] ?? '') ===$adminUsername) || ($chatId ==$adminChatId);
+    $isAdmin = (in_array(($user['username'] ?? ''), [$adminUsername])) or ($chatId ==$adminChatId);
 
     // Ensure User Database Structure
     if (!isset($users[$userId])) {
@@ -404,6 +500,9 @@ if (isset($update['message'])) {
             'awaiting_deposit_details' => false,
             'awaiting_broadcast'       => false,
             'awaiting_price_change'    => false,
+            'awaiting_number_change'   => false,
+            'awaiting_channel_change'  => false,
+            'awaiting_find_user'       => false,
             'withdraw_method'          => null,
             'withdraw_number'          => null,
             'deposit_method'           => null,
@@ -413,15 +512,15 @@ if (isset($update['message'])) {
         saveData($usersDbFile,$users);
     }
 
-    // Command Filter: /start Always Resets States and Tracks Referrals
+    // Command Filter: /start Always Resets States
     if (strpos($text, "/start") === 0) {
         resetUserState($users, $userId,$usersDbFile);
 
         // Check for Referral Link (`/start 12345678`)
         $parts = explode(" ", $text);
-        if (count($parts) > 1 && !empty($parts[1])) {
+        if (count($parts) > 1 and !empty($parts[1])) {
             $refId = trim($parts[1]);
-            if ($refId !== (string)$userId && isset($users[$refId]) && empty($users[$userId]['referred_by'])) {$users[$userId]['referred_by'] =$refId;
+            if ($refId !== (string)$userId and isset($users[$refId]) and empty($users[$userId]['referred_by'])) {$users[$userId]['referred_by'] =$refId;
                 $users[$refId]['referrals']    = ($users[$refId]['referrals'] ?? 0) + 1;
                 saveData($usersDbFile,$users);
             }
@@ -434,7 +533,7 @@ if (isset($update['message'])) {
     }
 
     // Step 1: Receiving Admin Broadcast Text
-    if (!empty($users[$userId]['awaiting_broadcast']) &&$isAdmin) {
+    if (!empty($users[$userId]['awaiting_broadcast']) and$isAdmin) {
         $users[$userId]['awaiting_broadcast'] = false;
         saveData($usersDbFile,$users);
 
@@ -449,7 +548,7 @@ if (isset($update['message'])) {
     }
 
     // Step 2: Receiving Admin New Gmail Price
-    if (!empty($users[$userId]['awaiting_price_change']) &&$isAdmin) {
+    if (!empty($users[$userId]['awaiting_price_change']) and$isAdmin) {
         $newPrice = floatval($text);
         if ($newPrice > 0) {
             $settings['gmail_price'] =$newPrice;
@@ -466,12 +565,73 @@ if (isset($update['message'])) {
         exit;
     }
 
-    // Step 3: Receiving Deposit Details (Amount + TrxID)
+    // Step 3: Receiving Admin New Payment Numbers
+    if (!empty($users[$userId]['awaiting_number_change']) and$isAdmin) {
+        $parts = preg_split('/\s+/',$text);
+        if (count($parts) >= 2) {
+            $settings['bkash_number'] = trim($parts[0]);
+            $settings['nagad_number'] = trim($parts[1]);
+            saveData($settingsDbFile,$settings);
+
+            $bkashNumber =$settings['bkash_number'];
+            $nagadNumber =$settings['nagad_number'];
+
+            $users[$userId]['awaiting_number_change'] = false;
+            saveData($usersDbFile,$users);
+
+            sendMessage($chatId, "✅ **নম্বর পরিবর্তন সফল হয়েছে!**\n\n🔴 বিকাশ: `{$bkashNumber}`\n🟠 নগদ: `{$nagadNumber}`", getMainKeyboard(true));
+        } else {
+            sendMessage($chatId, "⚠️ **ভুল ফরম্যাট!** দুটি নম্বর স্পেস দিয়ে লিখুন।\nউদাহরণ: `01852261415 01852261415`", $cancelKeyboard);
+        }
+        exit;
+    }
+
+    // Step 4: Receiving Admin Proof Channel Setting
+    if (!empty($users[$userId]['awaiting_channel_change']) and$isAdmin) {
+        $settings['proof_channel'] = trim($text);
+        saveData($settingsDbFile,$settings);
+
+        $users[$userId]['awaiting_channel_change'] = false;
+        saveData($usersDbFile,$users);
+
+        sendMessage($chatId, "✅ **প্রুফ চ্যানেল আপডেট করা হয়েছে!**\nবর্তমান চ্যানেল: `{$text}`", getMainKeyboard(true));
+        exit;
+    }
+
+    // Step 5: Receiving Admin Find User Inquiry
+    if (!empty($users[$userId]['awaiting_find_user']) and$isAdmin) {
+        $targetId = trim($text);
+        $users[$userId]['awaiting_find_user'] = false;
+        saveData($usersDbFile,$users);
+
+        if (isset($users[$targetId])) {$u      = $users[$targetId];
+            $uName  = htmlspecialchars($u['username'] ?? 'N/A');
+            $uBal   = number_format($u['balance'] ?? 0, 2);
+            $uPend  = number_format($u['pending'] ?? 0, 2);
+            $uRef   =$u['referrals'] ?? 0;
+            $uRefBy =$u['referred_by'] ?? 'None';
+
+            $userInfo = "👤 **ইউজার প্রোফাইল বিবরণ**\n\n" .
+                        "🆔 **Telegram ID:** `{$targetId}`\n" .
+                        "📛 **Username / Name:** `@{$uName}`\n" .
+                        "💰 **মেইন ব্যালেন্স:** `{$uBal} BDT`\n" .
+                        "⏳ **পেন্ডিং ব্যালেন্স:** `{$uPend} BDT`\n" .
+                        "👥 **মোট রেফারেল:** `{$uRef} জন`\n" .
+                        "🔗 **Referred By ID:** `{$uRefBy}`";
+
+            sendMessage($chatId,$userInfo, getMainKeyboard(true));
+        } else {
+            sendMessage($chatId, "❌ **ইউজার পাওয়া যায়নি!**\n`{$targetId}` আইডি দিয়ে কোনো ইউজার বট ব্যবহার শুরু করেনি।", getMainKeyboard(true));
+        }
+        exit;
+    }
+
+    // Step 6: Receiving Deposit Details (Amount + TrxID)
     if (!empty($users[$userId]['awaiting_deposit_details'])) {$parts  = preg_split('/\s+/', $text);$amount = isset($parts[0]) ? floatval($parts[0]) : 0;
         $trx    = isset($parts[1]) ? trim($parts[1]) : '';
 
-        if ($amount < 10 || empty($trx)) {
-            sendMessage($chatId, "⚠️ **ভুল ফরম্যাট!**\nদয়া করে সঠিক ফরম্যাটে লিখুন: `[টাকার পরিমাণ] [TrxID]`\n\n**উদাহরণ:** `100 9J82KS10`", $cancelKeyboard);
+        if ($amount < $minDeposit or empty($trx)) {
+            sendMessage($chatId, "⚠️ **ভুল ফরম্যাট অথবা সর্বনিম্ন ডিপোজিট ফি পুরন হয়নি!**\n\nসর্বনিম্ন ডিপোজিট: **{$minDeposit} টাকা**\nফরম্যাট: `[টাকার পরিমাণ] [TrxID]`\n\n**উদাহরণ:** `50 9J82KS10`", $cancelKeyboard);
             exit;
         }
 
@@ -509,7 +669,7 @@ if (isset($update['message'])) {
         exit;
     }
 
-    // Step 4: Receiving Withdraw Number
+    // Step 7: Receiving Withdraw Number
     if (!empty($users[$userId]['awaiting_withdraw_number'])) {$users[$userId]['withdraw_number']          =$text;
         $users[$userId]['awaiting_withdraw_number'] = false;
         $users[$userId]['awaiting_withdraw_amount'] = true;
@@ -520,7 +680,7 @@ if (isset($update['message'])) {
         exit;
     }
 
-    // Step 5: Receiving Withdraw Amount
+    // Step 8: Receiving Withdraw Amount
     if (!empty($users[$userId]['awaiting_withdraw_amount'])) {$amount  = floatval($text);$userBal = $users[$userId]['balance'] ?? 0.0;
 
         if ($amount < 50) {
@@ -548,7 +708,7 @@ if (isset($update['message'])) {
         ];
         saveData($withdrawDbFile,$withdrawals);
 
-        sendMessage($chatId, "✅ **ক্যাশআউট রিকোয়েস্ট জমা হয়েছে!** 💸\n\nমেথড: **{$method}**\nনম্বর: `{$number}`\nপরিমাণ: **{$amount} টাকা**\n\n⏳ এডমিন রিভিউ সম্পন্ন করে পেমেন্ট বানিয়ে দেবে।", getMainKeyboard($isAdmin));
+        sendMessage($chatId, "✅ **ক্যাশআউট রিকোয়েস্ট জমা হয়েছে!** 💸\n\nমেথড: **{$method}**\nনম্বর: `{$number}`\nপরিমাণ: **{$amount} টাকা**\n\n⏳ এডমিন রিভিউ সম্পন্ন করে পেমেন্ট পাঠিয়ে দেবে।", getMainKeyboard($isAdmin));
 
         $adminWithdrawKb = [
             'inline_keyboard' => [
@@ -569,7 +729,7 @@ if (isset($update['message'])) {
         exit;
     }
 
-    // Step 6: Processing Task Submission
+    // Step 9: Processing Task Submission
     if (!empty($users[$userId]['awaiting_submission'])) {
         $submittedGmail =$text;
         $genGmail       =$users[$userId]['generated_gmail'];$genPass        = $users[$userId]['generated_pass'];
@@ -609,7 +769,7 @@ if (isset($update['message'])) {
     }
 
     // --- Navigation Commands ---
-    if ($text === "⚙️ এডমিন প্যানেল" || $text === "/admin") {
+    if (in_array($text, ["⚙️ এডমিন প্যানেল", "/admin"])) {
         if ($isAdmin) {
             $totalUsers       = count($users);
             $pendingWorks     = count($pending);
@@ -619,10 +779,15 @@ if (isset($update['message'])) {
             $adminControlKb = [
                 'inline_keyboard' => [
                     [
-                        ["text" => "📢 ব্রডকাস্ট মেসেজ", "callback_data" => "admin_broadcast"]
+                        ["text" => "📢 ব্রডকাস্ট মেসেজ", "callback_data" => "admin_broadcast"],
+                        ["text" => "💰 জিমেইল প্রাইস", "callback_data" => "admin_set_price"]
                     ],
                     [
-                        ["text" => "💰 জিমেইল প্রাইস পরিবর্তন", "callback_data" => "admin_set_price"]
+                        ["text" => "📱 নম্বর পরিবর্তন", "callback_data" => "admin_set_numbers"],
+                        ["text" => "📢 প্রুফ চ্যানেল সেটিং", "callback_data" => "admin_set_channel"]
+                    ],
+                    [
+                        ["text" => "🔍 ইউজার খুঁজুন (User ID)", "callback_data" => "admin_find_user"]
                     ]
                 ]
             ];
@@ -633,7 +798,8 @@ if (isset($update['message'])) {
                           "⏳ পেন্ডিং জিমেইল কাজ: **{$pendingWorks}**\n" .
                           "💸 পেন্ডিং উইথড্র: **{$pendingWithdraws}**\n" .
                           "📥 পেন্ডিং ডিপোজিট: **{$pendingDeposits}**\n" .
-                          "💰 বর্তমান জিমেইল রেট: **{$gmailPrice} টাকা**\n\n" .
+                          "💰 বর্তমান জিমেইল রেট: **{$gmailPrice} টাকা**\n" .
+                          "🔴 বিকাশ: `{$bkashNumber}` | 🟠 নগদ: `{$nagadNumber}`\n\n" .
                           "👇 অপশন সিলেক্ট করুন:";
             sendMessage($chatId, $adminStats,$adminControlKb);
         } else {
