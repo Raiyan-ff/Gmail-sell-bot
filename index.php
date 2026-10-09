@@ -270,7 +270,7 @@ if (isset($update['callback_query'])) {
     $action =$parts[0] ?? '';
 
     // 1. Gmail Task Approval
-    if ($action === "accept" \vert{}\vert{} $action === "reject") {
+    if ($action === "accept" || $action === "reject") {
         if (!$isAdmin) {
             sendMessage($chatId, "⚠️ **অ্যাক্সেস Denied!** আপনি এডমিন নন।");
             exit;
