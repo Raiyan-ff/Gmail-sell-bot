@@ -306,7 +306,7 @@ if (isset($update['callback_query'])) {
     }
 
     // 2. Cashout Approval
-    if ($action === "waccept" \vert{}\vert{} $action === "wreject") {
+    if ($action === "waccept" || $action === "wreject") {
         if (!$isAdmin) {
             sendMessage($chatId, "⚠️ **অ্যাক্সেস Denied!**");
             exit;
