@@ -1,9 +1,10 @@
 <?php
 /**
-​Telegram Gmail Task & Earning Bot (Production Ready)
-​Features: Dynamic Admin Panel, Deposit System with TrxID, Dynamic Referral Link, Gmail Price Update, Broadcast.
-*/
-​// ==========================================
+ * Telegram Gmail Task & Earning Bot (Production Ready)
+ * Features: Dynamic Admin Panel, Deposit System with TrxID, Dynamic Referral Link, Gmail Price Update, Broadcast.
+ */
+
+// ==========================================
 // 1. CONFIGURATION SETTINGS
 // ==========================================
 $botToken      = "8760332791:AAHLlAZdTKyW1lzdfvfiYIg0tZGKRf8zu7w";
