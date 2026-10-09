@@ -470,7 +470,7 @@ if (isset($update['message'])) {
     if (!empty($users[$userId]['awaiting_deposit_details'])) {$parts  = preg_split('/\s+/', $text);$amount = isset($parts[0]) ? floatval($parts[0]) : 0;
         $trx    = isset($parts[1]) ? trim($parts[1]) : '';
 
-        if ($amount < 10 \vert{}\vert{} empty($trx)) {
+        if ($amount < 10 || empty($trx)) {
             sendMessage($chatId, "⚠️ **ভুল ফরম্যাট!**\nদয়া করে সঠিক ফরম্যাটে লিখুন: `[টাকার পরিমাণ] [TrxID]`\n\n**উদাহরণ:** `100 9J82KS10`", $cancelKeyboard);
             exit;
         }
@@ -609,7 +609,7 @@ if (isset($update['message'])) {
     }
 
     // --- Navigation Commands ---
-    if ($text === "⚙️ এডমিন প্যানেল" \vert{}\vert{} $text === "/admin") {
+    if ($text === "⚙️ এডমিন প্যানেল" || $text === "/admin") {
         if ($isAdmin) {
             $totalUsers       = count($users);
             $pendingWorks     = count($pending);
