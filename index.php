@@ -1,5 +1,5 @@
 <?php
-/
+/**
 ​Telegram Gmail Task & Earning Bot (Production Ready)
 ​Features: Dynamic Admin Panel, Deposit System with TrxID, Dynamic Referral Link, Gmail Price Update, Broadcast.
 */
