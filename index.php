@@ -11,7 +11,7 @@ $botToken      = "8760332791:AAHLlAZdTKyW1lzdfvfiYIg0tZGKRf8zu7w";
 $adminUsername = "raiyan_07j";
 $adminChatId   = "7278071284";
 $botUsername   = "RS1_ESPORTS_BD_bot";
-​$website       = "https://api.telegram.org/bot" . $botToken;
+​$website = "https://api.telegram.org/bot" . $botToken;
 ​// Database Files Path
 $usersDbFile    = __DIR__ . "/users.json";
 $pendingDbFile  = __DIR__ . "/pending.json";
