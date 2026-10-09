@@ -1,7 +1,7 @@
 <?php
 /**
  * Telegram Gmail Task & Earning Bot (Production Ready)
- * Features: Dynamic Admin Panel, Daily Serialized Channel Proofs, User Search, Dynamic Payment Numbers.
+ * Features: Dynamic Admin Panel, Daily Serialized Private Channel Proofs/Logs, User Search, Dynamic Payment Numbers.
  */
 
 // ==========================================
@@ -313,11 +313,12 @@ if (isset($update['callback_query'])) {
             $users[$chatId]['awaiting_channel_change'] = true;
             saveData($usersDbFile, $users);
 
-            $currChan = $settings['proof_channel'] ? $settings['proof_channel'] : "সেট করা নেই";
-            $msg = "📢 **প্রুফ চ্যানেল সেটিং**\n\n" .
-                   "বর্তমান চ্যানেল: `{$currChan}`\n\n" .
-                   "আপনার টেলিগ্রাম চ্যানেলের Username (যেমন: `@MyChannel`) অথবা Chat ID পাঠান:\n" .
-                   "*(নোট: বটকে অবশ্যই ওই চ্যানেলে Admin বানাতে হবে)*";
+            $currChan = !empty($settings['proof_channel']) ? $settings['proof_channel'] : "সেট করা নেই";
+            $msg = "📢 **প্রুফ ও লগের প্রাইভেট চ্যানেল সেটআপ**\n\n" .
+                   "বর্তমান চ্যানেল/Chat ID: `{$currChan}`\n\n" .
+                   "প্রাইভেট চ্যানেলের ক্ষেত্রে **Chat ID** (যেমন: `-1001234567890`)\n" .
+                   "অথবা পাবলিক চ্যানেলের ক্ষেত্রে **Username** (যেমন: `@MyChannel`) লিখে পাঠান:\n\n" .
+                   "⚠️ **মনে রাখবেন:** বটকে অবশ্যই আপনার চ্যানেলে **Admin** বানাতে হবে যাতে সে পোস্ট করতে পারে।";
             sendMessage($chatId, $msg, $cancelKeyboard);
             exit;
         }
@@ -358,7 +359,7 @@ if (isset($update['callback_query'])) {
         if ($action === "accept") {
             // Daily Reset Logic
             $today = date("Y-m-d");
-            if (($settings['last_reset_date'] ?? '') !== $today) {
+            if (!isset($settings['last_reset_date']) or $settings['last_reset_date'] !== $today) {
                 $settings['last_reset_date']      = $today;
                 $settings['daily_approved_count'] = 0;
             }
@@ -377,17 +378,17 @@ if (isset($update['callback_query'])) {
             editMessageText($chatId, $messageId, "✅ **কাজ অনুমোদিত (Approved)!**\n👤 ইউজার `{$targetUser}`-কে **{$gmailPrice} টাকা** যুক্ত করা হয়েছে।\n🔢 আজকের সিরিয়াল: **#{$serialNum}**");
             sendMessage($targetUser, "🎉 **অভিনন্দন!** আপনার জমাকৃত জিমেইলটি এডমিন কর্তৃক এপ্রুভ করা হয়েছে এবং **{$gmailPrice} টাকা** 💵 আপনার ব্যালেন্সে যোগ করা হয়েছে। 🥳");
 
-            // Send Proof to Channel
-            if (!empty($settings['proof_channel'])) {
-                $subGmail =$subData['gmail'] ?? 'N/A';
-                $subPass  =$subData['pass'] ?? 'N/A';
+            // Send Detailed Task Log to Private Proof Channel
+            if (!empty($settings['proof_channel'])) {$subGmail = $subData['gmail'] ?? 'N/A';$subPass  = $subData['pass'] ?? 'N/A';$timeNow  = date("Y-m-d h:i A");
 
-                $channelMsg = "📧 **এপ্রুভড জিমেইল লগ** ✅\n\n" .
-                              "🔢 **সিরিয়াল:** #{$serialNum}\n" .
+                $channelMsg = "📋 **[COMPLETED TASK LOG]**\n" .
+                              "━━━━━━━━━━━━━━━━━━━\n" .
+                              "🔢 **দৈনিক সিরিয়াল:** #{$serialNum}\n" .
                               "👤 **ইউজার ID:** `{$targetUser}`\n" .
                               "📧 **ইমেইল:** `{$subGmail}`\n" .
                               "🔑 **পাসওয়ার্ড:** `{$subPass}`\n" .
-                              "📅 **তারিখ:** {$today}";
+                              "📅 **তারিখ ও সময়:** {$timeNow}\n" .
+                              "━━━━━━━━━━━━━━━━━━━";
 
                 sendMessage($settings['proof_channel'],$channelMsg);
             }
@@ -594,7 +595,7 @@ if (isset($update['message'])) {
         $users[$userId]['awaiting_channel_change'] = false;
         saveData($usersDbFile,$users);
 
-        sendMessage($chatId, "✅ **প্রুফ চ্যানেল আপডেট করা হয়েছে!**\nবর্তমান চ্যানেল: `{$text}`", getMainKeyboard(true));
+        sendMessage($chatId, "✅ **প্রুফ/লগ চ্যানেল আপডেট করা হয়েছে!**\nবর্তমান চ্যানেল/Chat ID: `{$text}`", getMainKeyboard(true));
         exit;
     }
 
