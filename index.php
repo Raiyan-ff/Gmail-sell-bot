@@ -342,7 +342,7 @@ if (isset($update['callback_query'])) {
     }
 
     // 3. Deposit Approval
-    if ($action === "daccept" \vert{}\vert{} $action === "dreject") {
+if ($action === "daccept" || $action === "dreject") {
         if (!$isAdmin) {
             sendMessage($chatId, "⚠️ **অ্যাক্সেস Denied!**");
             exit;
