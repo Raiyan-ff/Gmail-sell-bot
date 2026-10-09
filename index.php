@@ -13,11 +13,11 @@ $adminChatId   = "7278071284";
 $botUsername   = "RS1_ESPORTS_BD_bot"; // Your Telegram Bot Username (without @)
 ​$website       = "https://api.telegram.org/bot" . $botToken;
 ​// Database Files Path
-$usersDbFile    = DIR . "/users.json";
-$pendingDbFile  = DIR . "/pending.json";
-$withdrawDbFile = DIR . "/withdrawals.json";
-$depositDbFile  = DIR . "/deposits.json";
-$settingsDbFile = DIR . "/settings.json";
+$usersDbFile    = __DIR__ . "/users.json";
+$pendingDbFile  = __DIR__ . "/pending.json";
+$withdrawDbFile = __DIR__ . "/withdrawals.json";
+$depositDbFile  = __DIR__ . "/deposits.json";
+$settingsDbFile = __DIR__ . "/settings.json";
 ​// Helper Database Functions
 function loadData($file) {
 if (!file_exists($file)) {
