@@ -94,6 +94,21 @@ function sendMessage($chatId, $text, $keyboard = null) {
     return $res;
 }
 
+function copyMessageToUser($toChatId, $fromChatId, $messageId) {
+    global $website;
+    $payload = [
+        'chat_id' => $toChatId,
+        'from_chat_id' => $fromChatId,
+        'message_id' => $messageId
+    ];
+    $ch = curl_init($website . '/copyMessage');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($payload));
+    $res = curl_exec($ch);
+    curl_close($ch);
+    return $res;
+}
+
 function editMessageText($chatId, $messageId, $text, $keyboard = null) {
     global $website;
     $payload = [
@@ -136,6 +151,9 @@ function resetUserState(&$users, $userId, $file) {
     $users[$userId]['awaiting_number_change']   = false;
     $users[$userId]['awaiting_channel_change']  = false;
     $users[$userId]['awaiting_find_user']       = false;
+    $users[$userId]['awaiting_balance_user']    = false;
+    $users[$userId]['awaiting_balance_amount']  = false;
+    $users[$userId]['awaiting_manual_task']     = false;
     $users[$userId]['withdraw_method']          = null;
     $users[$userId]['withdraw_number']          = null;
     $users[$userId]['deposit_method']           = null;
@@ -280,7 +298,7 @@ if (isset($update['callback_query'])) {
             $users[$chatId]['awaiting_broadcast'] = true;
             saveData($usersDbFile, $users);
 
-            sendMessage($chatId, "📢 **ব্রডকাস্ট মেসেজ অপশন**\n\nযে মেসেজটি সকল বটের ইউজারের কাছে পাঠাতে চান, তা নিচে টাইপ করে পাঠান:", $cancelKeyboard);
+            sendMessage($chatId, "📢 **ব্রডকাস্ট মেসেজ অপশন**\n\nযে কনটেন্টটি সকল বটের ইউজারের কাছে পাঠাতে চান, সেটি পাঠান। টেক্সট, ইমোজি, ছবি, ভিডিও, ফাইল, লিংক ও ক্যাপশন সাপোর্ট করে:", $cancelKeyboard);
             exit;
         }
 
@@ -329,6 +347,55 @@ if (isset($update['callback_query'])) {
             saveData($usersDbFile, $users);
 
             sendMessage($chatId, "🔍 **ইউজার খুঁজুন**\n\nযে ইউজারের তথ্য জানতে চান, তার **Telegram User ID** লিখে পাঠান:", $cancelKeyboard);
+            exit;
+        }
+
+        if ($data === "admin_users" || preg_match('/^admin_users_page_\\d+$/', $data)) {
+            $page = ($data === "admin_users") ? 0 : (int)substr($data, strlen("admin_users_page_"));
+            $perPage = 15;
+            $allIds = array_values(array_filter(array_keys($users), 'is_numeric'));
+            sort($allIds, SORT_NUMERIC);
+            $total = count($allIds);
+            $pages = max(1, (int)ceil($total / $perPage));
+            $page = max(0, min($page, $pages - 1));
+            $slice = array_slice($allIds, $page * $perPage, $perPage);
+            $list = "👥 **সকল ইউজারের তথ্য**\\nমোট ইউজার: **{$total}**\\nপৃষ্ঠা: " . ($page + 1) . "/{$pages}\\n\\n";
+            foreach ($slice as $uid) {
+                $u = $users[$uid];
+                $uname = trim((string)($u['username'] ?? ''));
+                if ($uname === '') $uname = 'username নেই';
+                elseif ($uname[0] !== '@') $uname = '@' . $uname;
+                $bal = number_format((float)($u['balance'] ?? 0), 2);
+                $list .= "🆔 `{$uid}` | {$uname} | 💰 {$bal} টাকা\\n";
+            }
+            $nav = [];
+            if ($page > 0) $nav[] = ["text" => "⬅️ আগের", "callback_data" => "admin_users_page_" . ($page - 1)];
+            if ($page < $pages - 1) $nav[] = ["text" => "পরের ➡️", "callback_data" => "admin_users_page_" . ($page + 1)];
+            $kb = ['inline_keyboard' => []];
+            if ($nav) $kb['inline_keyboard'][] = $nav;
+            $kb['inline_keyboard'][] = [["text" => "🔙 এডমিন প্যানেল", "callback_data" => "admin_back"]];
+            sendMessage($chatId, $list, $kb);
+            exit;
+        }
+
+        if ($data === "admin_add_balance") {
+            resetUserState($users, $chatId, $usersDbFile);
+            $users[$chatId]['awaiting_balance_user'] = true;
+            saveData($usersDbFile, $users);
+            sendMessage($chatId, "💰 **ইউজারের ব্যালেন্স যোগ করুন**\\nপ্রথমে ইউজারের Telegram ID পাঠান:", $cancelKeyboard);
+            exit;
+        }
+
+        if ($data === "admin_manual_task") {
+            resetUserState($users, $chatId, $usersDbFile);
+            $users[$chatId]['awaiting_manual_task'] = true;
+            saveData($usersDbFile, $users);
+            sendMessage($chatId, "🎯 **ম্যানুয়াল টাস্ক যোগ করুন**\\nযে টাস্কটি একজন র‍্যান্ডম ইউজারকে পাঠাতে চান, সেটি এখন পাঠান। টেক্সট, ইমোজি, ছবি, ফাইল বা লিংক—সবই গ্রহণ করা হবে।", $cancelKeyboard);
+            exit;
+        }
+
+        if ($data === "admin_back") {
+            sendMessage($chatId, "এডমিন প্যানেলে ফিরতে /admin লিখুন।", getMainKeyboard(true));
             exit;
         }
     }
@@ -492,7 +559,8 @@ if (isset($update['message'])) {
         $users[$userId] = [
             'balance'                  => 0.0,
             'pending'                  => 0.0,
-            'username'                 => $user['username'] ?? $user['first_name'],
+            'username'                 => $user['username'] ?? '',
+            'first_name'               => $user['first_name'] ?? '',
             'referrals'                => 0,
             'referred_by'              => null,
             'awaiting_submission'      => false,
@@ -504,6 +572,9 @@ if (isset($update['message'])) {
             'awaiting_number_change'   => false,
             'awaiting_channel_change'  => false,
             'awaiting_find_user'       => false,
+            'awaiting_balance_user'    => false,
+            'awaiting_balance_amount'  => false,
+            'awaiting_manual_task'     => false,
             'withdraw_method'          => null,
             'withdraw_number'          => null,
             'deposit_method'           => null,
@@ -512,6 +583,10 @@ if (isset($update['message'])) {
         ];
         saveData($usersDbFile,$users);
     }
+    // Keep Telegram username/name current for admin search and user directory.
+    $users[$userId]['username'] = $user['username'] ?? '';
+    $users[$userId]['first_name'] = $user['first_name'] ?? '';
+    saveData($usersDbFile, $users);
 
     // Command Filter: /start Always Resets States
     if (strpos($text, "/start") === 0) {
@@ -533,18 +608,87 @@ if (isset($update['message'])) {
         exit;
     }
 
-    // Step 1: Receiving Admin Broadcast Text
-    if (!empty($users[$userId]['awaiting_broadcast']) and$isAdmin) {
+    // Step 1: Broadcast any Telegram message type (text, emoji, photo, document, link, etc.)
+    if (!empty($users[$userId]['awaiting_broadcast']) && $isAdmin) {
         $users[$userId]['awaiting_broadcast'] = false;
-        saveData($usersDbFile,$users);
-
+        saveData($usersDbFile, $users);
         $count = 0;
-        foreach ($users as $uId =>$uData) {
-            if (is_numeric($uId)) {
-                sendMessage($uId, "📢 **[ADMIN ANNOUNCEMENT]**\n\n" . $text);$count++;
+        $failed = 0;
+        foreach ($users as $uId => $uData) {
+            if (is_numeric($uId) && (string)$uId !== (string)$userId) {
+                $result = copyMessageToUser($uId, $chatId, $message['message_id']);
+                $decoded = json_decode((string)$result, true);
+                if (is_array($decoded) && !empty($decoded['ok'])) $count++;
+                else $failed++;
             }
         }
-        sendMessage($chatId, "✅ **ব্রডকাস্ট সম্পন্ন হয়েছে!**\nমোট **{$count}** জন ইউজারের কাছে মেসেজ পাঠানো হয়েছে।", getMainKeyboard(true));
+        sendMessage($chatId, "✅ **ব্রডকাস্ট সম্পন্ন হয়েছে!**\\nসফল: **{$count}** জন\\nব্যর্থ: **{$failed}** জন", getMainKeyboard(true));
+        exit;
+    }
+
+    // Admin: choose user ID, then enter the balance amount to add.
+    if (!empty($users[$userId]['awaiting_balance_user']) && $isAdmin) {
+        $targetId = trim($text);
+        if (!ctype_digit($targetId) || !isset($users[$targetId])) {
+            sendMessage($chatId, "❌ ইউজার পাওয়া যায়নি। সঠিক Telegram User ID দিন:", $cancelKeyboard);
+            exit;
+        }
+        $users[$userId]['balance_target_id'] = $targetId;
+        $users[$userId]['awaiting_balance_user'] = false;
+        $users[$userId]['awaiting_balance_amount'] = true;
+        saveData($usersDbFile, $users);
+        $targetName = !empty($users[$targetId]['username']) ? '@' . ltrim($users[$targetId]['username'], '@') : 'username নেই';
+        sendMessage($chatId, "👤 ইউজার: `{$targetId}` ({$targetName})\\nবর্তমান ব্যালেন্স: " . number_format((float)($users[$targetId]['balance'] ?? 0), 2) . " টাকা\\n\\nকত টাকা যোগ করবেন? শুধু পরিমাণ লিখুন:", $cancelKeyboard);
+        exit;
+    }
+
+    if (!empty($users[$userId]['awaiting_balance_amount']) && $isAdmin) {
+        $amountText = trim($text);
+        if (!is_numeric($amountText) || (float)$amountText <= 0 || (float)$amountText > 100000000) {
+            sendMessage($chatId, "❌ সঠিক পরিমাণ দিন। পরিমাণ অবশ্যই ০-এর বেশি হতে হবে:", $cancelKeyboard);
+            exit;
+        }
+        $targetId = (string)($users[$userId]['balance_target_id'] ?? '');
+        $amount = round((float)$amountText, 2);
+        if (!isset($users[$targetId])) {
+            $users[$userId]['awaiting_balance_amount'] = false;
+            saveData($usersDbFile, $users);
+            sendMessage($chatId, "❌ ইউজার পাওয়া যায়নি। আবার চেষ্টা করুন।", getMainKeyboard(true));
+            exit;
+        }
+        $users[$targetId]['balance'] = (float)($users[$targetId]['balance'] ?? 0) + $amount;
+        $users[$userId]['awaiting_balance_amount'] = false;
+        unset($users[$userId]['balance_target_id']);
+        saveData($usersDbFile, $users);
+        sendMessage($targetId, "🎉 এডমিন আপনার ব্যালেন্সে " . number_format($amount, 2) . " টাকা যোগ করেছেন।", getMainKeyboard(false));
+        sendMessage($chatId, "✅ সফলভাবে `{$targetId}` ইউজারের ব্যালেন্সে " . number_format($amount, 2) . " টাকা যোগ হয়েছে।\\nনতুন ব্যালেন্স: " . number_format((float)$users[$targetId]['balance'], 2) . " টাকা", getMainKeyboard(true));
+        exit;
+    }
+
+    // Admin manual task: forward/copy the submitted content to one random registered user.
+    if (!empty($users[$userId]['awaiting_manual_task']) && $isAdmin) {
+        $users[$userId]['awaiting_manual_task'] = false;
+        saveData($usersDbFile, $users);
+        $eligible = [];
+        foreach (array_keys($users) as $candidateId) {
+            if (is_numeric($candidateId) && (string)$candidateId !== (string)$adminChatId && (string)$candidateId !== (string)$userId) {
+                $eligible[] = (string)$candidateId;
+            }
+        }
+        if (!$eligible) {
+            sendMessage($chatId, "❌ টাস্ক পাঠানোর মতো অন্য কোনো ইউজার পাওয়া যায়নি।", getMainKeyboard(true));
+            exit;
+        }
+        $targetId = $eligible[array_rand($eligible)];
+        sendMessage($targetId, "🎯 **আপনার জন্য নতুন ম্যানুয়াল টাস্ক এসেছে!**\\nনিচের নির্দেশনা অনুসরণ করুন:");
+        $result = copyMessageToUser($targetId, $chatId, $message['message_id']);
+        $decoded = json_decode((string)$result, true);
+        if (is_array($decoded) && !empty($decoded['ok'])) {
+            $targetName = !empty($users[$targetId]['username']) ? '@' . ltrim($users[$targetId]['username'], '@') : 'username নেই';
+            sendMessage($chatId, "✅ ম্যানুয়াল টাস্ক একজন র‍্যান্ডম ইউজারকে পাঠানো হয়েছে।\\n🆔 ID: `{$targetId}`\\n👤 Username: `{$targetName}`", getMainKeyboard(true));
+        } else {
+            sendMessage($chatId, "⚠️ নির্বাচিত ইউজারকে টাস্ক পাঠানো যায়নি। সম্ভবত ইউজার বট ব্লক করেছেন।", getMainKeyboard(true));
+        }
         exit;
     }
 
@@ -606,7 +750,9 @@ if (isset($update['message'])) {
         saveData($usersDbFile,$users);
 
         if (isset($users[$targetId])) {$u      = $users[$targetId];
-            $uName  = htmlspecialchars($u['username'] ?? 'N/A');
+            $uName  = trim((string)($u['username'] ?? 'N/A'));
+            if ($uName !== 'N/A' && $uName !== '' && $uName[0] !== '@') $uName = '@' . $uName;
+            if ($uName === '') $uName = 'username নেই';
             $uBal   = number_format($u['balance'] ?? 0, 2);
             $uPend  = number_format($u['pending'] ?? 0, 2);
             $uRef   =$u['referrals'] ?? 0;
@@ -614,7 +760,7 @@ if (isset($update['message'])) {
 
             $userInfo = "👤 **ইউজার প্রোফাইল বিবরণ**\n\n" .
                         "🆔 **Telegram ID:** `{$targetId}`\n" .
-                        "📛 **Username / Name:** `@{$uName}`\n" .
+                        "📛 **Username / Name:** `{$uName}`\n" .
                         "💰 **মেইন ব্যালেন্স:** `{$uBal} BDT`\n" .
                         "⏳ **পেন্ডিং ব্যালেন্স:** `{$uPend} BDT`\n" .
                         "👥 **মোট রেফারেল:** `{$uRef} জন`\n" .
@@ -788,7 +934,12 @@ if (isset($update['message'])) {
                         ["text" => "📢 প্রুফ চ্যানেল সেটিং", "callback_data" => "admin_set_channel"]
                     ],
                     [
-                        ["text" => "🔍 ইউজার খুঁজুন (User ID)", "callback_data" => "admin_find_user"]
+                        ["text" => "🔍 ইউজার খুঁজুন (User ID)", "callback_data" => "admin_find_user"],
+                        ["text" => "👥 সকল ইউজার ডাটা", "callback_data" => "admin_users"]
+                    ],
+                    [
+                        ["text" => "➕ ব্যালেন্স যোগ", "callback_data" => "admin_add_balance"],
+                        ["text" => "🎯 ম্যানুয়াল টাস্ক", "callback_data" => "admin_manual_task"]
                     ]
                 ]
             ];
