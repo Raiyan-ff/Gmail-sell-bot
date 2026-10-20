@@ -640,13 +640,21 @@ if (isset($update['message'])) {
         }
 
         $firstName = trim((string)($user['first_name'] ?? 'বন্ধু'));
-        $welcomeText = "✨ **স্বাগতম, " . $firstName . "!**\n" .
-                       "━━━━━━━━━━━━━━━━━━\n" .
-                       "🎉 **আপনাকে আমাদের বট প্ল্যাটফর্মে স্বাগতম।**\n\n" .
-                       "💼 কাজ শুরু করতে নিচের **📝 কাজ ▸** বাটনে চাপ দিন।\n" .
-                       "💰 আপনার আয় ও লেনদেনের তথ্য দেখতে **💵 ব্যালেন্স** নির্বাচন করুন।\n" .
-                       "🤝 সহায়তার প্রয়োজন হলে **🙋‍♂️ সাপোর্ট** বাটনে যোগাযোগ করুন।\n\n" .
-                       "🚀 শুভকামনা — আপনার কাজের যাত্রা শুরু হোক!";
+        $firstName = preg_replace('/[\x00-\x1F\x7F]/u', '', $firstName);
+        $firstName = str_replace(['*', '_', '`', '['], ['\\*', '\\_', '\\`', '\\['], $firstName);
+        $welcomeText = "🌟 **E-GMAIL BD — স্বাগতম!** 🌟\n" .
+                       "━━━━━━━━━━━━━━━━━━━━\n" .
+                       "👋 প্রিয় **" . $firstName . "**, আপনার আয় করার যাত্রা শুরু হোক এখান থেকেই!\n\n" .
+                       "🎯 **সহজ ধাপ:**\n" .
+                       "1️⃣ নিচের **📝 কাজ ▸** বাটনে চাপ দিয়ে কাজ নিন।\n" .
+                       "2️⃣ কাজের নির্দেশনা ভালোভাবে অনুসরণ করুন।\n" .
+                       "3️⃣ প্রমাণ জমা দিন এবং এডমিনের রিভিউয়ের জন্য অপেক্ষা করুন।\n\n" .
+                       "💰 **ব্যালেন্স** — আপনার আয় দেখুন\n" .
+                       "📥 **ডিপোজিট** — অ্যাকাউন্টে টাকা যোগ করুন\n" .
+                       "💸 **টাকা উত্তোলন** — উত্তোলনের অনুরোধ দিন\n" .
+                       "🎁 **My Referrals** — বন্ধুদের আমন্ত্রণ জানান\n\n" .
+                       "━━━━━━━━━━━━━━━━━━━━\n" .
+                       "✅ নিয়ম মেনে কাজ করুন • তথ্য সঠিক দিন • শুভকামনা!";
         sendMessage($chatId, $welcomeText, getMainKeyboard($isAdmin));
         exit;
     }
@@ -928,7 +936,16 @@ if (isset($update['message'])) {
         saveData($manualPendingFile, $manualPending);
         $reviewKb = ['inline_keyboard' => [[['text' => '✅ Approve', 'callback_data' => 'maccept_' . $manualId], ['text' => '❌ Reject', 'callback_data' => 'mreject_' . $manualId]]]];
         sendMessage($chatId, "✅ আপনার টাস্কের প্রমাণ অ্যাডমিনের কাছে জমা হয়েছে। রিভিউ শেষে ফলাফল জানানো হবে।", getMainKeyboard($isAdmin));
-        $adminMsg = "📥 **ম্যানুয়াল টাস্ক সাবমিশন**\n\n👤 ইউজার ID: `{$userId}`\n🔎 Username: @" . (($users[$userId]['username'] ?? '') ?: 'নেই') . "\n🧾 প্রমাণ: " . ($manualPending[$manualId]['proof_text']) . "\n💰 অনুমোদিত হলে পুরস্কার: " . number_format((float)$manualPending[$manualId]['reward'], 2) . " টাকা";
+        $proofText = (string)($manualPending[$manualId]['proof_text'] ?? '[মিডিয়া/ফাইল প্রমাণ]');
+        $proofText = str_replace(['&', '<', '>'], ['&amp;', '&lt;', '&gt;'], $proofText);
+        $adminUsernameText = ltrim((string)($users[$userId]['username'] ?? ''), '@');
+        $adminUsernameText = str_replace(['&', '<', '>'], ['&amp;', '&lt;', '&gt;'], $adminUsernameText);
+        $adminMsg = "📥 **ম্যানুয়াল টাস্ক সাবমিশন — রিভিউ প্রয়োজন**\n\n" .
+                    "👤 ইউজার ID: `{$userId}`\n" .
+                    "🔎 Username: " . ($adminUsernameText !== '' ? '@' . $adminUsernameText : 'নেই') . "\n" .
+                    "🧾 প্রমাণের লেখা: " . $proofText . "\n" .
+                    "💰 অনুমোদন করলে পুরস্কার: " . number_format((float)$manualPending[$manualId]['reward'], 2) . " টাকা\n\n" .
+                    "নিচের Approve/Reject বাটন ব্যবহার করে সিদ্ধান্ত নিন।";
         sendMessage($adminChatId, $adminMsg, $reviewKb);
         // Forward original proof (including media) to admin for review.
         if ((string)$chatId !== (string)$adminChatId) { copyMessageToUser($adminChatId, $chatId, (int)$message['message_id']); }
