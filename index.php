@@ -157,6 +157,7 @@ function resetUserState(&$users, $userId, $file) {
     $users[$userId]['awaiting_balance_user']    = false;
     $users[$userId]['awaiting_balance_amount']  = false;
     $users[$userId]['awaiting_manual_task']     = false;
+    $users[$userId]['awaiting_manual_submission'] = false;
     $users[$userId]['withdraw_method']          = null;
     $users[$userId]['withdraw_number']          = null;
     $users[$userId]['deposit_method']           = null;
@@ -249,6 +250,18 @@ if (isset($update['callback_query'])) {
 
         editMessageText($chatId, $messageId, "❌ **অপারেশনটি বাতিল করা হয়েছে!**");
         sendMessage($chatId, "প্রধান মেনু:", getMainKeyboard($isAdmin));
+        exit;
+    }
+
+    // --- Manual task submission start ---
+    if ($data === "user_manual_complete") {
+        if (empty($users[$chatId]['active_manual_task'])) {
+            sendMessage($chatId, "⚠️ আপনার জন্য কোনো সক্রিয় ম্যানুয়াল টাস্ক পাওয়া যায়নি। নতুন টাস্ক নিতে 📝 কাজ বাটনে চাপ দিন।");
+            exit;
+        }
+        $users[$chatId]['awaiting_manual_submission'] = true;
+        saveData($usersDbFile, $users);
+        editMessageText($chatId, $messageId, "📩 **টাস্ক সাবমিশন**\n\nটাস্ক সম্পন্ন করার প্রমাণ/রিপোর্ট লিখে পাঠান। ছবি বা ফাইলের প্রমাণ হলে সেটিও পাঠাতে পারেন।", $cancelKeyboard);
         exit;
     }
 
@@ -468,6 +481,27 @@ if (isset($update['callback_query'])) {
             }
             editMessageText($chatId,$messageId, "❌ **কাজ বাতিল করা হয়েছে (Rejected)!**");
             sendMessage($targetUser, "❌ **দুঃখিত!** আপনার জমাকৃত কাজটিতে ত্রুটি থাকায় এডমিন তা বাতিল করেছে। ⚠️");
+        }
+        exit;
+    }
+
+    // Manual task review (admin only)
+    if (in_array($action, ["maccept", "mreject"], true)) {
+        if (!$isAdmin) { sendMessage($chatId, "⛔ এই কাজটি রিভিউ করার অনুমতি আপনার নেই।"); exit; }
+        $manualId = implode('_', array_slice($parts, 1));
+        $manualPendingFile = __DIR__ . "/manual_pending.json";
+        $manualPending = loadData($manualPendingFile);
+        if (!isset($manualPending[$manualId])) { editMessageText($chatId, $messageId, "⚠️ এই ম্যানুয়াল টাস্কটি ইতোমধ্যে রিভিউ করা হয়েছে।"); exit; }
+        $item = $manualPending[$manualId]; unset($manualPending[$manualId]); saveData($manualPendingFile, $manualPending);
+        $target = (string)$item['user_id'];
+        if ($action === "maccept") {
+            $reward = max(0, (float)($item['reward'] ?? $gmailPrice));
+            if (isset($users[$target])) { $users[$target]['balance'] = (float)($users[$target]['balance'] ?? 0) + $reward; saveData($usersDbFile, $users); }
+            editMessageText($chatId, $messageId, "✅ ম্যানুয়াল টাস্ক অনুমোদিত।\nইউজার ID: {$target}\nপুরস্কার: " . number_format($reward, 2) . " টাকা");
+            sendMessage($target, "🎉 আপনার ম্যানুয়াল টাস্ক অনুমোদিত হয়েছে!\n💰 ব্যালেন্সে " . number_format($reward, 2) . " টাকা যোগ হয়েছে।");
+        } else {
+            editMessageText($chatId, $messageId, "❌ ম্যানুয়াল টাস্ক বাতিল করা হয়েছে।");
+            sendMessage($target, "❌ আপনার ম্যানুয়াল টাস্কটি অনুমোদিত হয়নি। প্রয়োজনে নির্দেশনা দেখে আবার চেষ্টা করুন।");
         }
         exit;
     }
@@ -874,6 +908,33 @@ if (isset($update['message'])) {
         exit;
     }
 
+    // Manual task proof submission: accept text, photo, document, video, etc.
+    if (!empty($users[$userId]['awaiting_manual_submission']) && !empty($users[$userId]['active_manual_task'])) {
+        $manualPendingFile = __DIR__ . "/manual_pending.json";
+        $manualPending = loadData($manualPendingFile);
+        $manualId = (string)$userId . "_" . time() . "_" . random_int(100, 999);
+        $users[$userId]['awaiting_manual_submission'] = false;
+        $task = $users[$userId]['active_manual_task'];
+        unset($users[$userId]['active_manual_task']);
+        saveData($usersDbFile, $users);
+        $manualPending[$manualId] = [
+            'user_id' => (string)$userId,
+            'proof_text' => (string)($message['text'] ?? $message['caption'] ?? '[মিডিয়া/ফাইল প্রমাণ]'),
+            'proof_message_id' => (int)$message['message_id'],
+            'proof_chat_id' => (string)$chatId,
+            'reward' => (float)($task['reward'] ?? $gmailPrice),
+            'submitted_at' => time()
+        ];
+        saveData($manualPendingFile, $manualPending);
+        $reviewKb = ['inline_keyboard' => [[['text' => '✅ Approve', 'callback_data' => 'maccept_' . $manualId], ['text' => '❌ Reject', 'callback_data' => 'mreject_' . $manualId]]]];
+        sendMessage($chatId, "✅ আপনার টাস্কের প্রমাণ অ্যাডমিনের কাছে জমা হয়েছে। রিভিউ শেষে ফলাফল জানানো হবে।", getMainKeyboard($isAdmin));
+        $adminMsg = "📥 **ম্যানুয়াল টাস্ক সাবমিশন**\n\n👤 ইউজার ID: `{$userId}`\n🔎 Username: @" . (($users[$userId]['username'] ?? '') ?: 'নেই') . "\n🧾 প্রমাণ: " . ($manualPending[$manualId]['proof_text']) . "\n💰 অনুমোদিত হলে পুরস্কার: " . number_format((float)$manualPending[$manualId]['reward'], 2) . " টাকা";
+        sendMessage($adminChatId, $adminMsg, $reviewKb);
+        // Forward original proof (including media) to admin for review.
+        if ((string)$chatId !== (string)$adminChatId) { copyMessageToUser($adminChatId, $chatId, (int)$message['message_id']); }
+        exit;
+    }
+
     // Step 9: Processing Task Submission
     if (!empty($users[$userId]['awaiting_submission'])) {
         $submittedGmail =$text;
@@ -967,8 +1028,12 @@ if (isset($update['message'])) {
             if (is_array($copyDecoded) && !empty($copyDecoded['ok'])) {
                 unset($manualTasks[$taskIndex]);
                 $settings['manual_tasks'] = array_values($manualTasks);
+                $users[$userId]['active_manual_task'] = ['assigned_at' => time(), 'reward' => (float)($task['reward'] ?? $gmailPrice)];
+                $users[$userId]['awaiting_manual_submission'] = false;
                 saveData($settingsDbFile, $settings);
-                sendMessage($chatId, "🎯 **আপনার জন্য একটি নতুন টাস্ক দেওয়া হয়েছে!**\n\nটাস্কটি সম্পন্ন করে নির্দেশনা অনুযায়ী পরবর্তী ধাপ অনুসরণ করুন।", getMainKeyboard($isAdmin));
+                saveData($usersDbFile, $users);
+                $manualKb = ['inline_keyboard' => [[['text' => '📩 টাস্ক সাবমিট করুন', 'callback_data' => 'user_manual_complete'], ['text' => '❌ বাতিল', 'callback_data' => 'user_task_cancel']]]];
+                sendMessage($chatId, "🎯 **আপনার জন্য নতুন ম্যানুয়াল টাস্ক!**\n\n📌 নির্দেশনা অনুযায়ী কাজটি সম্পন্ন করুন। এরপর নিচের **📩 টাস্ক সাবমিট করুন** বাটনে চাপ দিয়ে প্রমাণ পাঠান।\n\n💰 অনুমোদিত পুরস্কার: **" . number_format((float)($task['reward'] ?? $gmailPrice), 2) . " টাকা**", $manualKb);
                 exit;
             }
             // Keep the task in queue if delivery failed; continue to the regular task flow.
