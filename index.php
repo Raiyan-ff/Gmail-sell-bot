@@ -65,6 +65,9 @@ if (!isset($settings['daily_approved_count'])) {
 if (!isset($settings['last_reset_date'])) {
     $settings['last_reset_date'] = date("Y-m-d");
 }
+if (!isset($settings['manual_tasks']) || !is_array($settings['manual_tasks'])) {
+    $settings['manual_tasks'] = [];
+}
 saveData($settingsDbFile, $settings);
 
 $gmailPrice  = floatval($settings['gmail_price']);
@@ -359,14 +362,14 @@ if (isset($update['callback_query'])) {
             $pages = max(1, (int)ceil($total / $perPage));
             $page = max(0, min($page, $pages - 1));
             $slice = array_slice($allIds, $page * $perPage, $perPage);
-            $list = "👥 **সকল ইউজারের তথ্য**\\nমোট ইউজার: **{$total}**\\nপৃষ্ঠা: " . ($page + 1) . "/{$pages}\\n\\n";
+            $list = "👥 **সকল ইউজারের তথ্য**\n━━━━━━━━━━━━━━━━━━\n👤 মোট ইউজার: **{$total}**\n📄 পৃষ্ঠা: " . ($page + 1) . "/{$pages}\n\n";
             foreach ($slice as $uid) {
                 $u = $users[$uid];
-                $uname = trim((string)($u['username'] ?? ''));
-                if ($uname === '') $uname = 'username নেই';
-                elseif ($uname[0] !== '@') $uname = '@' . $uname;
+                $uname = ltrim(trim((string)($u['username'] ?? '')), '@');
+                $safeUname = str_replace('_', '\\_', $uname);
+                $nameLink = ($uname !== '') ? '[@' . $safeUname . '](https://t.me/' . rawurlencode($uname) . ')' : 'username নেই';
                 $bal = number_format((float)($u['balance'] ?? 0), 2);
-                $list .= "🆔 `{$uid}` | {$uname} | 💰 {$bal} টাকা\\n";
+                $list .= "🆔 `{$uid}`\n👤 {$nameLink}\n💰 ব্যালেন্স: **{$bal} টাকা**\n──────────────\n";
             }
             $nav = [];
             if ($page > 0) $nav[] = ["text" => "⬅️ আগের", "callback_data" => "admin_users_page_" . ($page - 1)];
@@ -382,7 +385,7 @@ if (isset($update['callback_query'])) {
             resetUserState($users, $chatId, $usersDbFile);
             $users[$chatId]['awaiting_balance_user'] = true;
             saveData($usersDbFile, $users);
-            sendMessage($chatId, "💰 **ইউজারের ব্যালেন্স যোগ করুন**\\nপ্রথমে ইউজারের Telegram ID পাঠান:", $cancelKeyboard);
+            sendMessage($chatId, "💰 **ইউজারের ব্যালেন্স যোগ করুন**\nপ্রথমে ইউজারের Telegram ID পাঠান:", $cancelKeyboard);
             exit;
         }
 
@@ -390,7 +393,7 @@ if (isset($update['callback_query'])) {
             resetUserState($users, $chatId, $usersDbFile);
             $users[$chatId]['awaiting_manual_task'] = true;
             saveData($usersDbFile, $users);
-            sendMessage($chatId, "🎯 **ম্যানুয়াল টাস্ক যোগ করুন**\\nযে টাস্কটি একজন র‍্যান্ডম ইউজারকে পাঠাতে চান, সেটি এখন পাঠান। টেক্সট, ইমোজি, ছবি, ফাইল বা লিংক—সবই গ্রহণ করা হবে।", $cancelKeyboard);
+            sendMessage($chatId, "🎯 **ম্যানুয়াল টাস্ক যোগ করুন**\n\nএখন টাস্কের মেসেজটি পাঠান। এটি টাস্ক তালিকায় সংরক্ষিত হবে। ইউজার **📝 কাজ ▸** বাটনে চাপলে তালিকা থেকে একটি টাস্ক র‍্যান্ডমভাবে তাকে দেওয়া হবে। টেক্সট, ইমোজি, ছবি, ফাইল ও লিংক সমর্থিত।", $cancelKeyboard);
             exit;
         }
 
@@ -602,8 +605,14 @@ if (isset($update['message'])) {
             }
         }
 
-        $welcomeText = "🥰 **স্বাগতম, " . htmlspecialchars($user['first_name']) . "!** 👋\n\n" .
-                       "✅ **কাজ শুরু করতে নিচের বাটনগুলো ব্যবহার করুন** 👇";
+        $firstName = trim((string)($user['first_name'] ?? 'বন্ধু'));
+        $welcomeText = "✨ **স্বাগতম, " . $firstName . "!**\n" .
+                       "━━━━━━━━━━━━━━━━━━\n" .
+                       "🎉 **আপনাকে আমাদের বট প্ল্যাটফর্মে স্বাগতম।**\n\n" .
+                       "💼 কাজ শুরু করতে নিচের **📝 কাজ ▸** বাটনে চাপ দিন।\n" .
+                       "💰 আপনার আয় ও লেনদেনের তথ্য দেখতে **💵 ব্যালেন্স** নির্বাচন করুন।\n" .
+                       "🤝 সহায়তার প্রয়োজন হলে **🙋‍♂️ সাপোর্ট** বাটনে যোগাযোগ করুন।\n\n" .
+                       "🚀 শুভকামনা — আপনার কাজের যাত্রা শুরু হোক!";
         sendMessage($chatId, $welcomeText, getMainKeyboard($isAdmin));
         exit;
     }
@@ -622,7 +631,7 @@ if (isset($update['message'])) {
                 else $failed++;
             }
         }
-        sendMessage($chatId, "✅ **ব্রডকাস্ট সম্পন্ন হয়েছে!**\\nসফল: **{$count}** জন\\nব্যর্থ: **{$failed}** জন", getMainKeyboard(true));
+        sendMessage($chatId, "✅ **ব্রডকাস্ট সম্পন্ন হয়েছে!**\nসফল: **{$count}** জন\nব্যর্থ: **{$failed}** জন", getMainKeyboard(true));
         exit;
     }
 
@@ -638,7 +647,7 @@ if (isset($update['message'])) {
         $users[$userId]['awaiting_balance_amount'] = true;
         saveData($usersDbFile, $users);
         $targetName = !empty($users[$targetId]['username']) ? '@' . ltrim($users[$targetId]['username'], '@') : 'username নেই';
-        sendMessage($chatId, "👤 ইউজার: `{$targetId}` ({$targetName})\\nবর্তমান ব্যালেন্স: " . number_format((float)($users[$targetId]['balance'] ?? 0), 2) . " টাকা\\n\\nকত টাকা যোগ করবেন? শুধু পরিমাণ লিখুন:", $cancelKeyboard);
+        sendMessage($chatId, "👤 ইউজার: `{$targetId}` ({$targetName})\nবর্তমান ব্যালেন্স: " . number_format((float)($users[$targetId]['balance'] ?? 0), 2) . " টাকা\n\nকত টাকা যোগ করবেন? শুধু পরিমাণ লিখুন:", $cancelKeyboard);
         exit;
     }
 
@@ -661,34 +670,23 @@ if (isset($update['message'])) {
         unset($users[$userId]['balance_target_id']);
         saveData($usersDbFile, $users);
         sendMessage($targetId, "🎉 এডমিন আপনার ব্যালেন্সে " . number_format($amount, 2) . " টাকা যোগ করেছেন।", getMainKeyboard(false));
-        sendMessage($chatId, "✅ সফলভাবে `{$targetId}` ইউজারের ব্যালেন্সে " . number_format($amount, 2) . " টাকা যোগ হয়েছে।\\nনতুন ব্যালেন্স: " . number_format((float)$users[$targetId]['balance'], 2) . " টাকা", getMainKeyboard(true));
+        sendMessage($chatId, "✅ সফলভাবে `{$targetId}` ইউজারের ব্যালেন্সে " . number_format($amount, 2) . " টাকা যোগ হয়েছে।\nনতুন ব্যালেন্স: " . number_format((float)$users[$targetId]['balance'], 2) . " টাকা", getMainKeyboard(true));
         exit;
     }
 
-    // Admin manual task: forward/copy the submitted content to one random registered user.
+    // Admin manual task: save source message; assign only when a user taps the Work button.
     if (!empty($users[$userId]['awaiting_manual_task']) && $isAdmin) {
         $users[$userId]['awaiting_manual_task'] = false;
+        $settings['manual_tasks'] = is_array($settings['manual_tasks'] ?? null) ? $settings['manual_tasks'] : [];
+        $settings['manual_tasks'][] = [
+            'chat_id' => (string)$chatId,
+            'message_id' => (int)$message['message_id'],
+            'added_by' => (string)$userId,
+            'added_at' => time()
+        ];
+        saveData($settingsDbFile, $settings);
         saveData($usersDbFile, $users);
-        $eligible = [];
-        foreach (array_keys($users) as $candidateId) {
-            if (is_numeric($candidateId) && (string)$candidateId !== (string)$adminChatId && (string)$candidateId !== (string)$userId) {
-                $eligible[] = (string)$candidateId;
-            }
-        }
-        if (!$eligible) {
-            sendMessage($chatId, "❌ টাস্ক পাঠানোর মতো অন্য কোনো ইউজার পাওয়া যায়নি।", getMainKeyboard(true));
-            exit;
-        }
-        $targetId = $eligible[array_rand($eligible)];
-        sendMessage($targetId, "🎯 **আপনার জন্য নতুন ম্যানুয়াল টাস্ক এসেছে!**\\nনিচের নির্দেশনা অনুসরণ করুন:");
-        $result = copyMessageToUser($targetId, $chatId, $message['message_id']);
-        $decoded = json_decode((string)$result, true);
-        if (is_array($decoded) && !empty($decoded['ok'])) {
-            $targetName = !empty($users[$targetId]['username']) ? '@' . ltrim($users[$targetId]['username'], '@') : 'username নেই';
-            sendMessage($chatId, "✅ ম্যানুয়াল টাস্ক একজন র‍্যান্ডম ইউজারকে পাঠানো হয়েছে।\\n🆔 ID: `{$targetId}`\\n👤 Username: `{$targetName}`", getMainKeyboard(true));
-        } else {
-            sendMessage($chatId, "⚠️ নির্বাচিত ইউজারকে টাস্ক পাঠানো যায়নি। সম্ভবত ইউজার বট ব্লক করেছেন।", getMainKeyboard(true));
-        }
+        sendMessage($chatId, "✅ **ম্যানুয়াল টাস্ক সংরক্ষিত হয়েছে!**\n\n📚 টাস্ক তালিকায় মোট: **" . count($settings['manual_tasks']) . "টি**\nইউজার **📝 কাজ ▸** বাটনে চাপলে একটি টাস্ক র‍্যান্ডমভাবে পাবে।", getMainKeyboard(true));
         exit;
     }
 
@@ -750,9 +748,9 @@ if (isset($update['message'])) {
         saveData($usersDbFile,$users);
 
         if (isset($users[$targetId])) {$u      = $users[$targetId];
-            $uName  = trim((string)($u['username'] ?? 'N/A'));
-            if ($uName !== 'N/A' && $uName !== '' && $uName[0] !== '@') $uName = '@' . $uName;
-            if ($uName === '') $uName = 'username নেই';
+            $uName = ltrim(trim((string)($u['username'] ?? '')), '@');
+            $safeUName = str_replace('_', '\\_', $uName);
+            $uNameDisplay = ($uName !== '') ? '[@' . $safeUName . '](https://t.me/' . rawurlencode($uName) . ')' : 'username নেই';
             $uBal   = number_format($u['balance'] ?? 0, 2);
             $uPend  = number_format($u['pending'] ?? 0, 2);
             $uRef   =$u['referrals'] ?? 0;
@@ -760,7 +758,7 @@ if (isset($update['message'])) {
 
             $userInfo = "👤 **ইউজার প্রোফাইল বিবরণ**\n\n" .
                         "🆔 **Telegram ID:** `{$targetId}`\n" .
-                        "📛 **Username / Name:** `{$uName}`\n" .
+                        "📛 **Username:** {$uNameDisplay}\n" .
                         "💰 **মেইন ব্যালেন্স:** `{$uBal} BDT`\n" .
                         "⏳ **পেন্ডিং ব্যালেন্স:** `{$uPend} BDT`\n" .
                         "👥 **মোট রেফারেল:** `{$uRef} জন`\n" .
@@ -959,6 +957,22 @@ if (isset($update['message'])) {
         }
     } 
     elseif ($text === "📝 কাজ ▸") {
+        // If manual tasks are queued, randomly choose one and deliver it to the user who tapped Work.
+        $manualTasks = is_array($settings['manual_tasks'] ?? null) ? $settings['manual_tasks'] : [];
+        if (!empty($manualTasks)) {
+            $taskIndex = array_rand($manualTasks);
+            $task = $manualTasks[$taskIndex];
+            $copyResult = copyMessageToUser($chatId, $task['chat_id'], (int)$task['message_id']);
+            $copyDecoded = json_decode((string)$copyResult, true);
+            if (is_array($copyDecoded) && !empty($copyDecoded['ok'])) {
+                unset($manualTasks[$taskIndex]);
+                $settings['manual_tasks'] = array_values($manualTasks);
+                saveData($settingsDbFile, $settings);
+                sendMessage($chatId, "🎯 **আপনার জন্য একটি নতুন টাস্ক দেওয়া হয়েছে!**\n\nটাস্কটি সম্পন্ন করে নির্দেশনা অনুযায়ী পরবর্তী ধাপ অনুসরণ করুন।", getMainKeyboard($isAdmin));
+                exit;
+            }
+            // Keep the task in queue if delivery failed; continue to the regular task flow.
+        }
         list($gmUser, $gmPass) = generateCredentials();$users[$userId]['generated_gmail'] =$gmUser;
         $users[$userId]['generated_pass']  =$gmPass;
         saveData($usersDbFile,$users);
