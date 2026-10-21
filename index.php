@@ -53,6 +53,9 @@ if (!isset($settings['bkash_number'])) {
 if (!isset($settings['nagad_number'])) {
     $settings['nagad_number'] = "01852261415";
 }
+if (!isset($settings['binance_id'])) {
+    $settings['binance_id'] = "1186036924";
+}
 if (!isset($settings['min_deposit'])) {
     $settings['min_deposit'] = 20.0;
 }
@@ -73,6 +76,7 @@ saveData($settingsDbFile, $settings);
 $gmailPrice  = floatval($settings['gmail_price']);
 $bkashNumber = $settings['bkash_number'];
 $nagadNumber = $settings['nagad_number'];
+$binanceId   = (string)$settings['binance_id'];
 $minDeposit  = floatval($settings['min_deposit']);
 
 // ==========================================
@@ -194,6 +198,9 @@ $withdrawKeyboard = [
             ["text" => "🟠 নগদ (Nagad)", "callback_data" => "wmethod_nagad"]
         ],
         [
+            ["text" => "🟡 Binance Pay", "callback_data" => "wmethod_binance"]
+        ],
+        [
             ["text" => "❌ বাতিল করুন", "callback_data" => "cancel_action"]
         ]
     ]
@@ -204,6 +211,9 @@ $depositKeyboard = [
         [
             ["text" => "🔴 বিকাশ (bKash)", "callback_data" => "depmethod_bkash"],
             ["text" => "🟠 নগদ (Nagad)", "callback_data" => "depmethod_nagad"]
+        ],
+        [
+            ["text" => "🟡 Binance Pay", "callback_data" => "depmethod_binance"]
         ],
         [
             ["text" => "❌ বাতিল করুন", "callback_data" => "cancel_action"]
@@ -239,7 +249,7 @@ if (isset($update['callback_query'])) {
     $data      = $callback['data'];
     $fromUser  = $callback['from'];
 
-    $isAdmin = (in_array(($fromUser['username'] ?? ''), [$adminUsername])) or ($chatId == $adminChatId);
+    $isAdmin = (in_array(($fromUser['username'] ?? ''), [$adminUsername], true) || (string)$chatId === (string)$adminChatId);
 
     // --- Action Cancel Button ---
     if (in_array($data, ["cancel_action", "user_task_cancel"])) {
@@ -275,29 +285,30 @@ if (isset($update['callback_query'])) {
     }
 
     // --- Cashout Method Selection ---
-    if (in_array($data, ["wmethod_bkash", "wmethod_nagad"])) {
-        $method = ($data === "wmethod_bkash") ? "বিকাশ" : "নগদ";
+    if (in_array($data, ["wmethod_bkash", "wmethod_nagad", "wmethod_binance"], true)) {
+        $method = ($data === "wmethod_bkash") ? "বিকাশ" : (($data === "wmethod_nagad") ? "নগদ" : "Binance Pay");
         $users[$chatId]['withdraw_method']          = $method;
         $users[$chatId]['awaiting_withdraw_number'] = true;
         saveData($usersDbFile, $users);
 
-        sendMessage($chatId, "📲 **{$method} পেমেন্ট গেটওয়ে**\n\nঅনুগ্রহ করে আপনার **{$method} নম্বরটি** লিখে মেসেজ পাঠান:", $cancelKeyboard);
+        sendMessage($chatId, "📲 **{$method} পেমেন্ট গেটওয়ে**\n\n" . ($method === "Binance Pay" ? "আপনার Binance Pay ID / UID লিখে পাঠান:" : "অনুগ্রহ করে আপনার **{$method} নম্বরটি** লিখে মেসেজ পাঠান:"), $cancelKeyboard);
         exit;
     }
 
     // --- Deposit Method Selection ---
-    if (in_array($data, ["depmethod_bkash", "depmethod_nagad"])) {
+    if (in_array($data, ["depmethod_bkash", "depmethod_nagad", "depmethod_binance"], true)) {
         $isBkash = ($data === "depmethod_bkash");
-        $method  = $isBkash ? "বিকাশ (bKash)" : "নগদ (Nagad)";
-        $number  = $isBkash ? $bkashNumber : $nagadNumber;
+        $isNagad = ($data === "depmethod_nagad");
+        $method  = $isBkash ? "বিকাশ (bKash)" : ($isNagad ? "নগদ (Nagad)" : "Binance Pay");
+        $number  = $isBkash ? $bkashNumber : ($isNagad ? $nagadNumber : $binanceId);
 
         $users[$chatId]['deposit_method']           = $method;
         $users[$chatId]['awaiting_deposit_details'] = true;
         saveData($usersDbFile, $users);
 
         $depMsg = "📥 **{$method} ডিপোজিট**\n\n" .
-                  "নিচের নম্বরে টাকা Send Money করুন:\n" .
-                  "📱 **নম্বর:** `{$number}` *(Personal)*\n" .
+                  ($method === "Binance Pay" ? "নিচের Binance Pay ID-তে পেমেন্ট করুন:\n" : "নিচের নম্বরে টাকা Send Money করুন:\n") .
+                  ($method === "Binance Pay" ? "🟡 **Binance Pay ID:** `{$number}`\n" : "📱 **নম্বর:** `{$number}` *(Personal)*\n") .
                   "💵 **সর্বনিম্ন ডিপোজিট:** **{$minDeposit} টাকা**\n\n" .
                   "⚠️ **টাকা পাঠানোর পর নিচের মতো এক মেসেজে পাঠান:**\n" .
                   "`[টাকার পরিমাণ] [TrxID]`\n\n" .
@@ -427,7 +438,7 @@ if (isset($update['callback_query'])) {
             exit;
         }
 
-        $subId = ($parts[1] ?? '') . "_" . ($parts[2] ?? '');
+        $subId = substr($data, strlen($action) + 1);
 
         if (!isset($pending[$subId])) {
             editMessageText($chatId, $messageId, "⚠️ **এই কাজটি ইতোমধ্যে রিভিউ করা শেষ!** 🛑");
@@ -439,69 +450,73 @@ if (isset($update['callback_query'])) {
         unset($pending[$subId]);
         saveData($pendingDbFile, $pending);
 
+        $isManualTask = (($subData['type'] ?? '') === 'manual');
+        $reward = max(0, (float)($subData['reward'] ?? $gmailPrice));
+
         if ($action === "accept") {
-            // Daily Reset Logic
-            $today = date("Y-m-d");
-            if (!isset($settings['last_reset_date']) or $settings['last_reset_date'] !== $today) {
-                $settings['last_reset_date']      = $today;
-                $settings['daily_approved_count'] = 0;
-            }
-
-            $settings['daily_approved_count']++;
-            saveData($settingsDbFile, $settings);
-
-            $serialNum = $settings['daily_approved_count'];
-
             if (isset($users[$targetUser])) {
-                $users[$targetUser]['pending'] = max(0, ($users[$targetUser]['pending'] ?? 0) - $gmailPrice);
-                $users[$targetUser]['balance'] = ($users[$targetUser]['balance'] ?? 0) + $gmailPrice;
+                if (!$isManualTask) {
+                    $users[$targetUser]['pending'] = max(0, (float)($users[$targetUser]['pending'] ?? 0) - $gmailPrice);
+                }
+                $users[$targetUser]['balance'] = (float)($users[$targetUser]['balance'] ?? 0) + $reward;
                 saveData($usersDbFile, $users);
             }
 
-            editMessageText($chatId, $messageId, "✅ **কাজ অনুমোদিত (Approved)!**\n👤 ইউজার `{$targetUser}`-কে **{$gmailPrice} টাকা** যুক্ত করা হয়েছে।\n🔢 আজকের সিরিয়াল: **#{$serialNum}**");
-            sendMessage($targetUser, "🎉 **অভিনন্দন!** আপনার জমাকৃত জিমেইলটি এডমিন কর্তৃক এপ্রুভ করা হয়েছে এবং **{$gmailPrice} টাকা** 💵 আপনার ব্যালেন্সে যোগ করা হয়েছে। 🥳");
-
-            // Send Detailed Task Log to Private Proof Channel
-            if (!empty($settings['proof_channel'])) {$subGmail = $subData['gmail'] ?? 'N/A';$subPass  = $subData['pass'] ?? 'N/A';$timeNow  = date("Y-m-d h:i A");
-
-                $channelMsg = "📋 **[COMPLETED TASK LOG]**\n" .
-                              "━━━━━━━━━━━━━━━━━━━\n" .
-                              "🔢 **দৈনিক সিরিয়াল:** #{$serialNum}\n" .
-                              "👤 **ইউজার ID:** `{$targetUser}`\n" .
-                              "📧 **ইমেইল:** `{$subGmail}`\n" .
-                              "🔑 **পাসওয়ার্ড:** `{$subPass}`\n" .
-                              "📅 **তারিখ ও সময়:** {$timeNow}\n" .
-                              "━━━━━━━━━━━━━━━━━━━";
-
-                sendMessage($settings['proof_channel'],$channelMsg);
+            if ($isManualTask) {
+                editMessageText($chatId, $messageId, "✅ **ম্যানুয়াল টাস্ক Approved!**\n👤 ইউজার ID: `{$targetUser}`\n💰 পুরস্কার: **" . number_format($reward, 2) . " টাকা**");
+                sendMessage($targetUser, "🎉 **অভিনন্দন!** আপনার ম্যানুয়াল টাস্ক অনুমোদিত হয়েছে।\n💰 আপনার ব্যালেন্সে **" . number_format($reward, 2) . " টাকা** যোগ হয়েছে।");
+            } else {
+                $today = date("Y-m-d");
+                if (!isset($settings['last_reset_date']) || $settings['last_reset_date'] !== $today) {
+                    $settings['last_reset_date'] = $today;
+                    $settings['daily_approved_count'] = 0;
+                }
+                $settings['daily_approved_count'] = (int)$settings['daily_approved_count'] + 1;
+                saveData($settingsDbFile, $settings);
+                $serialNum = $settings['daily_approved_count'];
+                editMessageText($chatId, $messageId, "✅ **কাজ অনুমোদিত (Approved)!**\n👤 ইউজার `{$targetUser}`-কে **" . number_format($reward, 2) . " টাকা** যুক্ত করা হয়েছে।\n🔢 আজকের সিরিয়াল: **#{$serialNum}**");
+                sendMessage($targetUser, "🎉 **অভিনন্দন!** আপনার জমাকৃত কাজ এপ্রুভ হয়েছে এবং **" . number_format($reward, 2) . " টাকা** আপনার ব্যালেন্সে যোগ করা হয়েছে। 🥳");
+                if (!empty($settings['proof_channel'])) {
+                    $subGmail = $subData['gmail'] ?? 'N/A';
+                    $subPass = $subData['pass'] ?? 'N/A';
+                    $timeNow = date("Y-m-d h:i A");
+                    $channelMsg = "📋 **[COMPLETED TASK LOG]**\n━━━━━━━━━━━━━━━━━━━\n🔢 **দৈনিক সিরিয়াল:** #{$serialNum}\n👤 **ইউজার ID:** `{$targetUser}`\n📧 **ইমেইল:** `{$subGmail}`\n🔑 **পাসওয়ার্ড:** `{$subPass}`\n📅 **তারিখ ও সময়:** {$timeNow}\n━━━━━━━━━━━━━━━━━━━";
+                    sendMessage($settings['proof_channel'], $channelMsg);
+                }
             }
-        } elseif ($action === "reject") {
-            if (isset($users[$targetUser])) {$users[$targetUser]['pending'] = max(0, ($users[$targetUser]['pending'] ?? 0) -$gmailPrice);
-                saveData($usersDbFile,$users);
+        } else {
+            if (!$isManualTask && isset($users[$targetUser])) {
+                $users[$targetUser]['pending'] = max(0, (float)($users[$targetUser]['pending'] ?? 0) - $gmailPrice);
+                saveData($usersDbFile, $users);
             }
-            editMessageText($chatId,$messageId, "❌ **কাজ বাতিল করা হয়েছে (Rejected)!**");
-            sendMessage($targetUser, "❌ **দুঃখিত!** আপনার জমাকৃত কাজটিতে ত্রুটি থাকায় এডমিন তা বাতিল করেছে। ⚠️");
+            editMessageText($chatId, $messageId, $isManualTask ? "❌ **ম্যানুয়াল টাস্ক Reject করা হয়েছে।**" : "❌ **কাজ বাতিল করা হয়েছে (Rejected)!**");
+            sendMessage($targetUser, $isManualTask ? "❌ আপনার জমা দেওয়া ম্যানুয়াল টাস্কটি অনুমোদিত হয়নি।" : "❌ দুঃখিত! আপনার জমাকৃত কাজটি বাতিল করা হয়েছে।");
         }
         exit;
     }
 
-    // Manual task review (admin only)
+    // Backward compatibility: review manual submissions created by the previous version.
     if (in_array($action, ["maccept", "mreject"], true)) {
         if (!$isAdmin) { sendMessage($chatId, "⛔ এই কাজটি রিভিউ করার অনুমতি আপনার নেই।"); exit; }
-        $manualId = implode('_', array_slice($parts, 1));
-        $manualPendingFile = __DIR__ . "/manual_pending.json";
-        $manualPending = loadData($manualPendingFile);
-        if (!isset($manualPending[$manualId])) { editMessageText($chatId, $messageId, "⚠️ এই ম্যানুয়াল টাস্কটি ইতোমধ্যে রিভিউ করা হয়েছে।"); exit; }
-        $item = $manualPending[$manualId]; unset($manualPending[$manualId]); saveData($manualPendingFile, $manualPending);
-        $target = (string)$item['user_id'];
+        $legacyId = substr($data, strlen($action) + 1);
+        $legacyFile = __DIR__ . "/manual_pending.json";
+        $legacyPending = loadData($legacyFile);
+        if (!isset($legacyPending[$legacyId])) { editMessageText($chatId, $messageId, "⚠️ এই সাবমিশনটি পাওয়া যায়নি বা আগেই রিভিউ হয়েছে।"); exit; }
+        $legacyItem = $legacyPending[$legacyId];
+        unset($legacyPending[$legacyId]);
+        saveData($legacyFile, $legacyPending);
+        $legacyUser = (string)($legacyItem['user_id'] ?? '');
+        $legacyReward = max(0, (float)($legacyItem['reward'] ?? $gmailPrice));
         if ($action === "maccept") {
-            $reward = max(0, (float)($item['reward'] ?? $gmailPrice));
-            if (isset($users[$target])) { $users[$target]['balance'] = (float)($users[$target]['balance'] ?? 0) + $reward; saveData($usersDbFile, $users); }
-            editMessageText($chatId, $messageId, "✅ ম্যানুয়াল টাস্ক অনুমোদিত।\nইউজার ID: {$target}\nপুরস্কার: " . number_format($reward, 2) . " টাকা");
-            sendMessage($target, "🎉 আপনার ম্যানুয়াল টাস্ক অনুমোদিত হয়েছে!\n💰 ব্যালেন্সে " . number_format($reward, 2) . " টাকা যোগ হয়েছে।");
+            if (isset($users[$legacyUser])) {
+                $users[$legacyUser]['balance'] = (float)($users[$legacyUser]['balance'] ?? 0) + $legacyReward;
+                saveData($usersDbFile, $users);
+            }
+            editMessageText($chatId, $messageId, "✅ পুরোনো ম্যানুয়াল টাস্ক Approved!\nইউজার: {$legacyUser}\nপুরস্কার: " . number_format($legacyReward, 2) . " টাকা");
+            sendMessage($legacyUser, "🎉 আপনার ম্যানুয়াল টাস্ক অনুমোদিত হয়েছে। ব্যালেন্সে " . number_format($legacyReward, 2) . " টাকা যোগ হয়েছে।");
         } else {
-            editMessageText($chatId, $messageId, "❌ ম্যানুয়াল টাস্ক বাতিল করা হয়েছে।");
-            sendMessage($target, "❌ আপনার ম্যানুয়াল টাস্কটি অনুমোদিত হয়নি। প্রয়োজনে নির্দেশনা দেখে আবার চেষ্টা করুন।");
+            editMessageText($chatId, $messageId, "❌ পুরোনো ম্যানুয়াল টাস্ক Reject করা হয়েছে।");
+            sendMessage($legacyUser, "❌ আপনার ম্যানুয়াল টাস্কটি অনুমোদিত হয়নি।");
         }
         exit;
     }
@@ -916,38 +931,34 @@ if (isset($update['message'])) {
         exit;
     }
 
-    // Manual task proof submission: accept text, photo, document, video, etc.
+    // Manual task proof is stored in the SAME pending queue as regular tasks.
     if (!empty($users[$userId]['awaiting_manual_submission']) && !empty($users[$userId]['active_manual_task'])) {
-        $manualPendingFile = __DIR__ . "/manual_pending.json";
-        $manualPending = loadData($manualPendingFile);
-        $manualId = (string)$userId . "_" . time() . "_" . random_int(100, 999);
-        $users[$userId]['awaiting_manual_submission'] = false;
+        $manualId = (string)$userId . "_" . random_int(100000, 999999);
+        while (isset($pending[$manualId])) { $manualId = (string)$userId . "_" . random_int(100000, 999999); }
         $task = $users[$userId]['active_manual_task'];
+        $users[$userId]['awaiting_manual_submission'] = false;
         unset($users[$userId]['active_manual_task']);
         saveData($usersDbFile, $users);
-        $manualPending[$manualId] = [
+        $pending[$manualId] = [
+            'type' => 'manual',
             'user_id' => (string)$userId,
+            'gmail' => '[ম্যানুয়াল টাস্ক]',
             'proof_text' => (string)($message['text'] ?? $message['caption'] ?? '[মিডিয়া/ফাইল প্রমাণ]'),
             'proof_message_id' => (int)$message['message_id'],
             'proof_chat_id' => (string)$chatId,
-            'reward' => (float)($task['reward'] ?? $gmailPrice),
+            'reward' => max(0, (float)($task['reward'] ?? $gmailPrice)),
             'submitted_at' => time()
         ];
-        saveData($manualPendingFile, $manualPending);
-        $reviewKb = ['inline_keyboard' => [[['text' => '✅ Approve', 'callback_data' => 'maccept_' . $manualId], ['text' => '❌ Reject', 'callback_data' => 'mreject_' . $manualId]]]];
-        sendMessage($chatId, "✅ আপনার টাস্কের প্রমাণ অ্যাডমিনের কাছে জমা হয়েছে। রিভিউ শেষে ফলাফল জানানো হবে।", getMainKeyboard($isAdmin));
-        $proofText = (string)($manualPending[$manualId]['proof_text'] ?? '[মিডিয়া/ফাইল প্রমাণ]');
-        $proofText = str_replace(['&', '<', '>'], ['&amp;', '&lt;', '&gt;'], $proofText);
-        $adminUsernameText = ltrim((string)($users[$userId]['username'] ?? ''), '@');
-        $adminUsernameText = str_replace(['&', '<', '>'], ['&amp;', '&lt;', '&gt;'], $adminUsernameText);
-        $adminMsg = "📥 **ম্যানুয়াল টাস্ক সাবমিশন — রিভিউ প্রয়োজন**\n\n" .
-                    "👤 ইউজার ID: `{$userId}`\n" .
-                    "🔎 Username: " . ($adminUsernameText !== '' ? '@' . $adminUsernameText : 'নেই') . "\n" .
-                    "🧾 প্রমাণের লেখা: " . $proofText . "\n" .
-                    "💰 অনুমোদন করলে পুরস্কার: " . number_format((float)$manualPending[$manualId]['reward'], 2) . " টাকা\n\n" .
-                    "নিচের Approve/Reject বাটন ব্যবহার করে সিদ্ধান্ত নিন।";
+        saveData($pendingDbFile, $pending);
+        $rewardText = number_format((float)$pending[$manualId]['reward'], 2);
+        $reviewKb = ['inline_keyboard' => [[
+            ['text' => '✅ Approve (' . $rewardText . ' Tk)', 'callback_data' => 'accept_' . $manualId],
+            ['text' => '❌ Reject', 'callback_data' => 'reject_' . $manualId]
+        ]]];
+        sendMessage($chatId, "✅ আপনার টাস্কের প্রমাণ জমা হয়েছে। অ্যাডমিন রিভিউ শেষে ফলাফল জানানো হবে।", getMainKeyboard($isAdmin));
+        // Keep admin review text simple to avoid Markdown failures from user-submitted content.
+        $adminMsg = "📥 নতুন ম্যানুয়াল টাস্ক সাবমিশন\n\nইউজার ID: {$userId}\nপুরস্কার: {$rewardText} টাকা\nপ্রমাণ নিচের ফরওয়ার্ড করা মেসেজে দেখুন।\nApprove/Reject করতে বাটন ব্যবহার করুন।";
         sendMessage($adminChatId, $adminMsg, $reviewKb);
-        // Forward original proof (including media) to admin for review.
         if ((string)$chatId !== (string)$adminChatId) { copyMessageToUser($adminChatId, $chatId, (int)$message['message_id']); }
         exit;
     }
@@ -1027,7 +1038,7 @@ if (isset($update['message'])) {
                           "💸 পেন্ডিং উইথড্র: **{$pendingWithdraws}**\n" .
                           "📥 পেন্ডিং ডিপোজিট: **{$pendingDeposits}**\n" .
                           "💰 বর্তমান জিমেইল রেট: **{$gmailPrice} টাকা**\n" .
-                          "🔴 বিকাশ: `{$bkashNumber}` | 🟠 নগদ: `{$nagadNumber}`\n\n" .
+                          "🔴 বিকাশ: `{$bkashNumber}` | 🟠 নগদ: `{$nagadNumber}` | 🟡 Binance Pay: `{$binanceId}`\n\n" .
                           "👇 অপশন সিলেক্ট করুন:";
             sendMessage($chatId, $adminStats,$adminControlKb);
         } else {
@@ -1045,7 +1056,7 @@ if (isset($update['message'])) {
             if (is_array($copyDecoded) && !empty($copyDecoded['ok'])) {
                 unset($manualTasks[$taskIndex]);
                 $settings['manual_tasks'] = array_values($manualTasks);
-                $users[$userId]['active_manual_task'] = ['assigned_at' => time(), 'reward' => (float)($task['reward'] ?? $gmailPrice)];
+                $users[$userId]['active_manual_task'] = ['assigned_at' => time(), 'reward' => (float)($task['reward'] ?? $gmailPrice), 'task_id' => (string)($task['id'] ?? $task['message_id'] ?? '')];
                 $users[$userId]['awaiting_manual_submission'] = false;
                 saveData($settingsDbFile, $settings);
                 saveData($usersDbFile, $users);
@@ -1083,10 +1094,10 @@ if (isset($update['message'])) {
         sendMessage($chatId,$msg);
     } 
     elseif ($text === "💰 টাকা উত্তোলন") {
-        sendMessage($chatId, "💳 **টাকা উত্তোলন সেকশন** 💸\n\nপেমেন্ট নেওয়ার জন্য বিকাশ বা নগদ নির্বাচন করুন 👇", $withdrawKeyboard);
+        sendMessage($chatId, "💳 **টাকা উত্তোলন সেকশন** 💸\n\nপেমেন্ট নেওয়ার জন্য বিকাশ, নগদ বা Binance Pay নির্বাচন করুন 👇", $withdrawKeyboard);
     }
     elseif ($text === "📥 ডিপোজিট") {
-        sendMessage($chatId, "📥 **ব্যালেন্স রিচার্জ / ডিপোজিট** 💳\n\nটাকা যোগ করতে নিচে বিকাশ বা নগদ নির্বাচন করুন 👇", $depositKeyboard);
+        sendMessage($chatId, "📥 **ব্যালেন্স রিচার্জ / ডিপোজিট** 💳\n\nটাকা যোগ করতে নিচে বিকাশ, নগদ বা Binance Pay নির্বাচন করুন 👇", $depositKeyboard);
     }
     elseif ($text === "🎁 My Referrals") {
         $refCount = $users[$userId]['referrals'] ?? 0;
